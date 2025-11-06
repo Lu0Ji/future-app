@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Guess the Future</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+    }
+    h1 {
+      text-align: center;
+    }
+    form {
+      margin-bottom: 24px;
+      padding: 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+    textarea, input[type="date"] {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+    }
+    button {
+      padding: 8px 16px;
+      cursor: pointer;
+    }
+    .prediction {
+      border-bottom: 1px solid #eee;
+      padding: 8px 0;
+    }
+    .prediction small {
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Guess the Future</h1>
+
+  <form id="prediction-form">
+    <label for="content">Prediction</label>
+    <textarea id="content" rows="3" placeholder="Write your prediction here..."></textarea>
+
+    <label for="targetDate">Target Date</label>
+    <input type="date" id="targetDate" />
+
+    <button type="submit">Submit Prediction</button>
+  </form>
+
+  <h2>Predictions</h2>
+  <div id="predictions-list"></div>
+
+  <script>
+    const form = document.getElementById('prediction-form');
+    const contentInput = document.getElementById('content');
+    const dateInput = document.getElementById('targetDate');
+    const listEl = document.getElementById('predictions-list');
+
+    async function loadPredictions() {
+  const response = await fetch('/api/predictions');
+  const data = await response.json();
+
+  listEl.innerHTML = '';
+
+  if (data.count === 0) {
+    listEl.innerHTML = '<p>No predictions are visible yet. They will appear here when their target date is reached.</p>';
+    return;
+  }
+
+  data.data.forEach(prediction => {
+    const div = document.createElement('div');
+    div.className = 'prediction';
+    div.innerHTML = `
+      <strong>${prediction.content}</strong><br />
+      <small>Target: ${prediction.targetDate}</small><br />
+      <small>Created: ${new Date(prediction.createdAt).toLocaleString()}</small>
+    `;
+    listEl.appendChild(div);
+  });
+}
+
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const content = contentInput.value.trim();
+      const targetDate = dateInput.value;
+
+      if (!content || !targetDate) {
+        alert('Prediction and target date are required.');
+        return;
+      }
+
+      await fetch('/api/predictions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content, targetDate })
+      });
+
+      contentInput.value = '';
+      dateInput.value = '';
+
+      await loadPredictions();
+    });
+
+    // Sayfa açıldığında mevcut tahminleri yükle
+    loadPredictions();
+  </script>
+</body>
+</html>
