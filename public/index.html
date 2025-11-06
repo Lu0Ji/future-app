@@ -64,29 +64,32 @@
     const dateInput = document.getElementById('targetDate');
     const listEl = document.getElementById('predictions-list');
 
+    // Bugünden önceki tarihler seçilemesin (görsel taraf)
+    const todayString = new Date().toISOString().split('T')[0];
+    dateInput.min = todayString;
+
     async function loadPredictions() {
-  const response = await fetch('/api/predictions');
-  const data = await response.json();
+      const response = await fetch('/api/predictions');
+      const data = await response.json();
 
-  listEl.innerHTML = '';
+      listEl.innerHTML = '';
 
-  if (data.count === 0) {
-    listEl.innerHTML = '<p>No predictions are visible yet. They will appear here when their target date is reached.</p>';
-    return;
-  }
+      if (data.count === 0) {
+        listEl.innerHTML = '<p>No predictions are visible yet. They will appear here when their target date is reached.</p>';
+        return;
+      }
 
-  data.data.forEach(prediction => {
-    const div = document.createElement('div');
-    div.className = 'prediction';
-    div.innerHTML = `
-      <strong>${prediction.content}</strong><br />
-      <small>Target: ${prediction.targetDate}</small><br />
-      <small>Created: ${new Date(prediction.createdAt).toLocaleString()}</small>
-    `;
-    listEl.appendChild(div);
-  });
-}
-
+      data.data.forEach(prediction => {
+        const div = document.createElement('div');
+        div.className = 'prediction';
+        div.innerHTML = `
+          <strong>${prediction.content}</strong><br />
+          <small>Target: ${prediction.targetDate}</small><br />
+          <small>Created: ${new Date(prediction.createdAt).toLocaleString()}</small>
+        `;
+        listEl.appendChild(div);
+      });
+    }
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -99,13 +102,26 @@
         return;
       }
 
-      await fetch('/api/predictions', {
+      // 🔴 Geçmiş tarih seçilmesini engelle (ön uç)
+      const today = new Date().toISOString().split('T')[0];
+      if (targetDate < today) {
+        alert('You cannot select a date in the past.');
+        return;
+      }
+
+      const response = await fetch('/api/predictions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ content, targetDate })
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        alert(errorData.error || 'Something went wrong.');
+        return;
+      }
 
       contentInput.value = '';
       dateInput.value = '';
@@ -116,5 +132,6 @@
     // Sayfa açıldığında mevcut tahminleri yükle
     loadPredictions();
   </script>
+
 </body>
 </html>
