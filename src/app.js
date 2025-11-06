@@ -1,9 +1,12 @@
 const express = require('express');
 const app = express();
 const port = 3000;
+const authRoutes = require('../routes/auth');
 
 // JSON gövdesini okuyabilmek için
 app.use(express.json());
+
+app.use('/api/auth', authRoutes);
 
 // public klasöründeki statik dosyaları sun
 app.use(express.static('public'));
