@@ -1,19 +1,32 @@
+require('dotenv').config(); // .env yükle
+
 const express = require('express');
+const connectDB = require('../config/database');
+const categoryRoutes = require('../routes/categories');
+const statsRoutes = require('../routes/stats');
+
+
+const authRoutes = require('../routes/auth');
+const predictionRoutes = require('../routes/predictions');
+
 const app = express();
 const port = 3000;
-const authRoutes = require('../routes/auth');
 
-// JSON gövdesini okuyabilmek için
+// MongoDB bağlantısı
+connectDB();
+
+// JSON body okumak için
 app.use(express.json());
-
-app.use('/api/auth', authRoutes);
 
 // public klasöründeki statik dosyaları sun
 app.use(express.static('public'));
 
 // Routes
-const predictionRoutes = require('../routes/predictions');
+app.use('/api/auth', authRoutes);
 app.use('/api/predictions', predictionRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/stats', statsRoutes);
+
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);

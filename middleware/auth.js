@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = 'dev-secret-change-later'; // auth.js ile aynı olmalı
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-later';
 
 function auth(req, res, next) {
   const authHeader = req.headers['authorization'] || req.headers.authorization;
@@ -18,7 +18,6 @@ function auth(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    // payload içinden user bilgisini çıkar
     req.user = {
       id: payload.userId,
       username: payload.username,
@@ -30,3 +29,4 @@ function auth(req, res, next) {
 }
 
 module.exports = auth;
+
