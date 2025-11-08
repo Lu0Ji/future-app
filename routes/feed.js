@@ -4,7 +4,8 @@ const auth = require('../middleware/auth');
 const Prediction = require('../models/Prediction');
 const Follow = require('../models/Follow');
 
-// GET /api/feed -> takip ettiklerimin (ve kendimin) zamanı gelmiş tahminleri
+// GET /api/feed -> takip ettiklerinin (ve kendinin) tahminleri
+// Gelecekteki tahminler: isLocked = true, content = null
 router.get('/', auth, async (req, res) => {
   try {
     const currentUserId = req.user.id;
@@ -21,6 +22,7 @@ router.get('/', auth, async (req, res) => {
       followedIds.push(currentUserId);
     }
 
+    // Hiç kimseyi takip etmiyorsa ve kendisi de yoksa (çok düşük ihtimal)
     if (followedIds.length === 0) {
       return res.json({
         userId: currentUserId,
@@ -37,25 +39,27 @@ router.get('/', auth, async (req, res) => {
       .populate('user', 'username')
       .sort({ targetDate: 1, createdAt: -1 });
 
-    // 4) Sadece zamanı gelmiş olanları göster (targetDate <= bugün)
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const visible = predictions.filter((p) => {
+    // 4) Her tahmini mühür durumuna göre dön
+    const data = predictions.map((p) => {
       const targetStr = p.targetDate.toISOString().split('T')[0];
-      return targetStr <= todayStr;
-    });
+      const isLocked = targetStr > todayStr; // gelecekteyse mühürlü
 
-    const data = visible.map((p) => ({
-      id: p._id,
-      userId: p.user._id,
-      username: p.user.username,
-      category: p.category,
-      content: p.content,
-      targetDate: p.targetDate.toISOString().split('T')[0],
-      createdAt: p.createdAt,
-      status: p.status || 'pending',
-      resolvedAt: p.resolvedAt || null,
-    }));
+      return {
+        id: p._id,
+        userId: p.user._id,
+        username: p.user.username,
+        category: p.category,
+        // Mühürlü ise içerik HİÇ gönderilmiyor:
+        content: isLocked ? null : p.content,
+        isLocked,
+        targetDate: targetStr,
+        createdAt: p.createdAt,
+        status: p.status || 'pending',
+        resolvedAt: p.resolvedAt || null,
+      };
+    });
 
     return res.json({
       userId: currentUserId,
