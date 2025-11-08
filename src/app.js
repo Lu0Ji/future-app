@@ -4,6 +4,7 @@ const express = require('express');
 const connectDB = require('../config/database');
 const categoryRoutes = require('../routes/categories');
 const statsRoutes = require('../routes/stats');
+const followRoutes = require('../routes/follow');
 
 
 const authRoutes = require('../routes/auth');
@@ -26,6 +27,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/predictions', predictionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/follow', followRoutes);
+
 
 
 app.listen(port, () => {
