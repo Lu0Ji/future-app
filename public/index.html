@@ -1,137 +1,274 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
   <meta charset="UTF-8" />
-  <title>Guess the Future</title>
+  <title>Guess The Future</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
     body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 40px auto;
+      margin: 0;
+      background: #0f172a;
+      color: #e5e7eb;
     }
-    h1 {
-      text-align: center;
-    }
-    form {
-      margin-bottom: 24px;
+    #app {
+      max-width: 960px;
+      margin: 0 auto;
       padding: 16px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    header small {
+      color: #9ca3af;
+      font-size: 12px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1.1fr 1.3fr;
+      gap: 16px;
+    }
+    section {
+      background: #111827;
+      border-radius: 12px;
+      padding: 12px 16px;
+      border: 1px solid #1f2937;
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+    h3 {
+      margin-top: 8px;
+      font-size: 15px;
+      margin-bottom: 6px;
     }
     label {
       display: block;
-      margin-bottom: 8px;
-      font-weight: bold;
+      font-size: 13px;
+      margin-bottom: 4px;
     }
-    textarea, input[type="date"] {
+    input, textarea, select, button {
       width: 100%;
-      padding: 8px;
-      margin-bottom: 12px;
-      box-sizing: border-box;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 13px;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: 1px solid #4f46e5;
+      border-color: #4f46e5;
+    }
+    textarea {
+      min-height: 80px;
+      resize: vertical;
     }
     button {
-      padding: 8px 16px;
+      margin-top: 8px;
       cursor: pointer;
+      font-weight: 500;
+      background: #4f46e5;
+      border-color: #4f46e5;
+      transition: background 0.15s ease, transform 0.05s ease;
     }
-    .prediction {
-      border-bottom: 1px solid #eee;
-      padding: 8px 0;
+    button:hover {
+      background: #6366f1;
     }
-    .prediction small {
-      color: #666;
+    button:active {
+      transform: scale(0.98);
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+    .row > div {
+      flex: 1;
+    }
+    .small {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    .message {
+      font-size: 12px;
+      margin-top: 4px;
+      min-height: 16px;
+    }
+    .message.error {
+      color: #f97373;
+    }
+    .message.success {
+      color: #4ade80;
+    }
+    #user-info {
+      font-size: 13px;
+      text-align: right;
+    }
+    #logout-btn {
+      width: auto;
+      padding-inline: 10px;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .disabled {
+      opacity: 0.5;
+    }
+    #feed-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 480px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .feed-item {
+      border-radius: 10px;
+      border: 1px solid #1f2937;
+      padding: 8px 10px;
+      background: #020617;
+    }
+    .feed-header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    .feed-user {
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+    .feed-category {
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: #111827;
+      border: 1px solid #1f2937;
+      font-size: 11px;
+    }
+    .feed-date {
+      font-size: 11px;
+    }
+    .feed-content {
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .feed-footer {
+      font-size: 11px;
+      color: #9ca3af;
+    }
+    @media (max-width: 800px) {
+      main {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>Guess the Future</h1>
+  <div id="app">
+    <header>
+      <div>
+        <h1>Guess The Future</h1>
+        <small>Sealed predictions / mühürlü tahminler</small>
+      </div>
+      <div style="text-align: right;">
+        <div id="user-info">Giriş yapmadınız</div>
+        <button id="logout-btn" type="button" style="display:none;">Çıkış yap</button>
+      </div>
+    </header>
 
-  <form id="prediction-form">
-    <label for="content">Prediction</label>
-    <textarea id="content" rows="3" placeholder="Write your prediction here..."></textarea>
+    <main>
+      <!-- Sol taraf: Auth + Tahmin -->
+      <div>
+        <section id="auth-section">
+          <h2>Giriş / Kayıt</h2>
+          <div class="row">
+            <div>
+              <h3>Kayıt ol</h3>
+              <form id="register-form">
+                <label for="register-username">Kullanıcı adı</label>
+                <input id="register-username" type="text" autocomplete="off" required />
 
-    <label for="targetDate">Target Date</label>
-    <input type="date" id="targetDate" />
+                <label for="register-email">E-posta</label>
+                <input id="register-email" type="email" autocomplete="off" required />
 
-    <button type="submit">Submit Prediction</button>
-  </form>
+                <label for="register-password">Şifre</label>
+                <input id="register-password" type="password" required />
 
-  <h2>Predictions</h2>
-  <div id="predictions-list"></div>
+                <button type="submit">Kayıt ol</button>
+              </form>
+            </div>
+            <div>
+              <h3>Giriş yap</h3>
+              <form id="login-form">
+                <label for="login-identifier">Kullanıcı adı veya e-posta</label>
+                <input id="login-identifier" type="text" autocomplete="off" required />
 
-  <script>
-    const form = document.getElementById('prediction-form');
-    const contentInput = document.getElementById('content');
-    const dateInput = document.getElementById('targetDate');
-    const listEl = document.getElementById('predictions-list');
+                <label for="login-password">Şifre</label>
+                <input id="login-password" type="password" required />
 
-    // Bugünden önceki tarihler seçilemesin (görsel taraf)
-    const todayString = new Date().toISOString().split('T')[0];
-    dateInput.min = todayString;
+                <button type="submit">Giriş yap</button>
+              </form>
+            </div>
+          </div>
+          <div id="auth-message" class="message"></div>
+          <p class="small">
+            Not: Şu an sadece backend’i test etmek için basit bir arayüz. İleride tasarımı güzelleştirip ekranları ayıracağız.
+          </p>
+        </section>
 
-    async function loadPredictions() {
-      const response = await fetch('/api/predictions');
-      const data = await response.json();
+        <section id="prediction-section">
+          <h2>Yeni tahmin oluştur</h2>
+          <form id="prediction-form">
+            <label for="prediction-content">Tahmin metni</label>
+            <textarea id="prediction-content" required placeholder="Örn: 2026 yılında X şirketinin hissesi %50 artacak..."></textarea>
 
-      listEl.innerHTML = '';
+            <div class="row">
+              <div>
+                <label for="prediction-date">Açılma tarihi</label>
+                <input id="prediction-date" type="date" required />
+              </div>
+              <div>
+                <label for="prediction-category">Kategori</label>
+                <select id="prediction-category" required>
+                  <option value="">Yükleniyor...</option>
+                </select>
+              </div>
+            </div>
 
-      if (data.count === 0) {
-        listEl.innerHTML = '<p>No predictions are visible yet. They will appear here when their target date is reached.</p>';
-        return;
-      }
+            <button type="submit">Tahmini mühürle</button>
+          </form>
+          <div id="prediction-message" class="message"></div>
+          <p class="small">
+            Geçmiş tarihe tahmin yapılamaz. Tahminler hedef tarihe kadar gizli kalır, sadece hedef tarih geldiğinde feed’de görünür.
+          </p>
+        </section>
+      </div>
 
-      data.data.forEach(prediction => {
-        const div = document.createElement('div');
-        div.className = 'prediction';
-        div.innerHTML = `
-          <strong>${prediction.content}</strong><br />
-          <small>Target: ${prediction.targetDate}</small><br />
-          <small>Created: ${new Date(prediction.createdAt).toLocaleString()}</small>
-        `;
-        listEl.appendChild(div);
-      });
-    }
+      <!-- Sağ taraf: Feed -->
+      <div>
+        <section id="feed-section">
+          <h2>Feed (takip ettiklerin + sen)</h2>
+          <div id="feed-list">
+            <p class="small">Henüz veri yok. Giriş yapıp tahmin oluşturduktan sonra burada görünecek.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
 
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-
-      const content = contentInput.value.trim();
-      const targetDate = dateInput.value;
-
-      if (!content || !targetDate) {
-        alert('Prediction and target date are required.');
-        return;
-      }
-
-      // 🔴 Geçmiş tarih seçilmesini engelle (ön uç)
-      const today = new Date().toISOString().split('T')[0];
-      if (targetDate < today) {
-        alert('You cannot select a date in the past.');
-        return;
-      }
-
-      const response = await fetch('/api/predictions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ content, targetDate })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        alert(errorData.error || 'Something went wrong.');
-        return;
-      }
-
-      contentInput.value = '';
-      dateInput.value = '';
-
-      await loadPredictions();
-    });
-
-    // Sayfa açıldığında mevcut tahminleri yükle
-    loadPredictions();
-  </script>
-
+  <script src="app.js"></script>
 </body>
 </html>
