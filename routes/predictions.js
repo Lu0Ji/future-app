@@ -59,18 +59,17 @@ router.post('/', auth, async (req, res) => {
 });
 
 // GET /api/predictions/mine -> login kullanıcının tüm tahminleri
+// Not: Gelecekteki tahminlerin İÇERİĞİ (content) kimseye gösterilmez.
 router.get('/mine', auth, async (req, res) => {
   try {
     const { status, category } = req.query;
 
     const filter = { user: req.user.id };
 
-    // Duruma göre filtre
     if (status && ['pending', 'correct', 'incorrect'].includes(status)) {
       filter.status = status;
     }
 
-    // Kategoriye göre filtre (isteğe bağlı)
     if (category && allowedCategoryKeys.includes(category)) {
       filter.category = category;
     }
@@ -78,15 +77,24 @@ router.get('/mine', auth, async (req, res) => {
     const predictions = await Prediction.find(filter)
       .sort({ createdAt: -1 });
 
-    const data = predictions.map((p) => ({
-      id: p._id,
-      category: p.category,
-      content: p.content,
-      targetDate: p.targetDate.toISOString().split('T')[0],
-      createdAt: p.createdAt,
-      status: p.status || 'pending',
-      resolvedAt: p.resolvedAt || null,
-    }));
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const data = predictions.map((p) => {
+      const targetStr = p.targetDate.toISOString().split('T')[0];
+      const isLocked = targetStr > todayStr; // gelecekte ise mühürlü
+
+      return {
+        id: p._id,
+        category: p.category,
+        // MÜHÜRLÜYSE içeriği asla göstermiyoruz:
+        content: isLocked ? null : p.content,
+        isLocked,
+        targetDate: targetStr,
+        createdAt: p.createdAt,
+        status: p.status || 'pending',
+        resolvedAt: p.resolvedAt || null,
+      };
+    });
 
     return res.json({
       userId: req.user.id,
@@ -99,6 +107,7 @@ router.get('/mine', auth, async (req, res) => {
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
 
 
 // GET /api/predictions -> sadece TARİHİ GELMİŞ tahminler (herkese açık)
