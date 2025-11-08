@@ -6,6 +6,8 @@ const categoryRoutes = require('../routes/categories');
 const statsRoutes = require('../routes/stats');
 const followRoutes = require('../routes/follow');
 const feedRoutes = require('../routes/feed');
+const userRoutes = require('../routes/users');
+
 
 
 
@@ -31,6 +33,8 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/follow', followRoutes);
 app.use('/api/feed', feedRoutes);
+app.use('/api/users', userRoutes);
+
 
 
 
