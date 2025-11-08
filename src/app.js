@@ -5,6 +5,8 @@ const connectDB = require('../config/database');
 const categoryRoutes = require('../routes/categories');
 const statsRoutes = require('../routes/stats');
 const followRoutes = require('../routes/follow');
+const feedRoutes = require('../routes/feed');
+
 
 
 const authRoutes = require('../routes/auth');
@@ -28,6 +30,8 @@ app.use('/api/predictions', predictionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/follow', followRoutes);
+app.use('/api/feed', feedRoutes);
+
 
 
 
