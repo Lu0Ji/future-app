@@ -125,14 +125,16 @@
     .disabled {
       opacity: 0.5;
     }
-    #feed-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      max-height: 480px;
-      overflow-y: auto;
-      padding-right: 4px;
+    #feed-list,
+    #my-predictions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 480px;
+    overflow-y: auto;
+    padding-right: 4px;
     }
+
     .feed-item {
       border-radius: 10px;
       border: 1px solid #1f2937;
@@ -258,6 +260,7 @@
       </div>
 
       <!-- Sağ taraf: Feed -->
+            <!-- Sağ taraf: Feed + Benim tahminlerim -->
       <div>
         <section id="feed-section">
           <h2>Feed (takip ettiklerin + sen)</h2>
@@ -265,7 +268,16 @@
             <p class="small">Henüz veri yok. Giriş yapıp tahmin oluşturduktan sonra burada görünecek.</p>
           </div>
         </section>
+
+        <section id="my-predictions-section">
+          <h2>Benim tahminlerim</h2>
+          <div id="my-predictions-list">
+            <p class="small">Henüz tahmininiz yok.</p>
+          </div>
+        </section>
       </div>
+
+
     </main>
   </div>
 

@@ -1,9 +1,8 @@
-// Basit frontend: auth, tahmin oluşturma ve feed gösterimi
+// Basit frontend: auth, tahmin oluşturma, feed ve "benim tahminlerim" görünümü
 
 let authToken = null;
 let currentUser = null;
 
-// DOM elemanlarını al
 document.addEventListener('DOMContentLoaded', () => {
   const userInfoEl = document.getElementById('user-info');
   const logoutBtn = document.getElementById('logout-btn');
@@ -20,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const predictionMessageEl = document.getElementById('prediction-message');
 
   const feedListEl = document.getElementById('feed-list');
+  const myPredictionsListEl = document.getElementById('my-predictions-list');
 
   // LocalStorage'dan auth bilgisi yükle
   const stored = localStorage.getItem('auth');
@@ -54,9 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
       loginForm.style.display = '';
       registerForm.style.display = '';
       predictionSection.classList.add('disabled');
-      predictionMessageEl.textContent = 'Tahmin göndermek için giriş yapmanız gerekiyor.';
+      predictionMessageEl.textContent =
+        'Tahmin göndermek için giriş yapmanız gerekiyor.';
       predictionMessageEl.className = 'message error';
-      feedListEl.innerHTML = '<p class="small">Feed için önce giriş yapın.</p>';
+      feedListEl.innerHTML =
+        '<p class="small">Feed için önce giriş yapın.</p>';
+      myPredictionsListEl.innerHTML =
+        '<p class="small">Tahminlerinizi görmek için önce giriş yapın.</p>';
     } else {
       userInfoEl.textContent = `Merhaba, ${currentUser.username}`;
       logoutBtn.style.display = 'inline-block';
@@ -66,8 +70,9 @@ document.addEventListener('DOMContentLoaded', () => {
       predictionMessageEl.textContent = '';
       predictionMessageEl.className = 'message';
 
-      // Giriş yaptıktan sonra feed'i yükle
+      // Giriş yaptıktan sonra feed ve kendi tahminlerimizi yükleyelim
       loadFeed();
+      loadMyPredictions();
     }
   }
 
@@ -124,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const items = data.data || [];
       if (items.length === 0) {
         feedListEl.innerHTML =
-          '<p class="small">Takip ettiklerinden veya senden, zamanı gelmiş tahmin bulunmuyor.</p>';
+          '<p class="small">Takip ettiklerinden veya senden, zamanı gelmiş ya da mühürlü tahmin bulunmuyor.</p>';
         return;
       }
 
@@ -134,20 +139,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.className = 'feed-item';
 
-        const statusLabel =
-          p.status === 'correct'
-            ? 'Doğru'
-            : p.status === 'incorrect'
-            ? 'Yanlış'
-            : 'Bekliyor';
+        const statusLabel = p.isLocked
+          ? 'Mühürlü'
+          : p.status === 'correct'
+          ? 'Doğru'
+          : p.status === 'incorrect'
+          ? 'Yanlış'
+          : 'Bekliyor';
+
+        const contentText = p.isLocked
+          ? 'Bu kategoride mühürlü bir tahmin var. İçerik açılma tarihinde görünecek.'
+          : p.content;
 
         div.innerHTML = `
           <div class="feed-header">
             <span class="feed-user">${p.username}</span>
-            <span class="feed-category">${p.category}</span>
+            <span class="feed-category">${p.category}${
+          p.isLocked ? ' 🔒' : ''
+        }</span>
             <span class="feed-date">${p.targetDate}</span>
           </div>
-          <div class="feed-content">${p.content}</div>
+          <div class="feed-content">${contentText}</div>
           <div class="feed-footer">Durum: ${statusLabel}</div>
         `;
 
@@ -157,6 +169,72 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error(err);
       feedListEl.innerHTML =
         '<p class="small">Feed yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
+  // Benim tahminlerim
+  async function loadMyPredictions() {
+    if (!authToken) {
+      myPredictionsListEl.innerHTML =
+        '<p class="small">Tahminlerinizi görmek için önce giriş yapın.</p>';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/predictions/mine', {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Tahminler yüklenemedi.');
+      }
+
+      const items = data.data || [];
+      if (items.length === 0) {
+        myPredictionsListEl.innerHTML =
+          '<p class="small">Henüz tahmininiz yok.</p>';
+        return;
+      }
+
+      myPredictionsListEl.innerHTML = '';
+
+      items.forEach((p) => {
+        const div = document.createElement('div');
+        div.className = 'feed-item';
+
+        const statusLabel = p.isLocked
+          ? 'Mühürlü'
+          : p.status === 'correct'
+          ? 'Doğru'
+          : p.status === 'incorrect'
+          ? 'Yanlış'
+          : 'Bekliyor';
+
+        const contentText = p.isLocked
+          ? 'Mühürlü tahmin. İçerik açılma tarihinde görünecek.'
+          : p.content;
+
+        const lockTag = p.isLocked ? ' 🔒' : '';
+
+        div.innerHTML = `
+          <div class="feed-header">
+            <span class="feed-category">${p.category}${lockTag}</span>
+            <span class="feed-date">${p.targetDate}</span>
+          </div>
+          <div class="feed-content">${contentText}</div>
+          <div class="feed-footer">Durum: ${statusLabel}</div>
+        `;
+
+        myPredictionsListEl.appendChild(div);
+      });
+    } catch (err) {
+      console.error(err);
+      myPredictionsListEl.innerHTML =
+        '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
     }
   }
 
@@ -306,16 +384,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      predictionMessageEl.textContent =
-        'Tahmin başarıyla mühürlendi. Hedef tarihinde feed’de görünecek.';
+      predictionMessageEl.textContent = 'Tahmin başarıyla mühürlendi.';
       predictionMessageEl.className = 'message success';
       predictionForm.reset();
 
-      // Hedef tarih bugünse feed'i yenileyelim
-      const todayStr = new Date().toISOString().split('T')[0];
-      if (targetDate <= todayStr) {
-        loadFeed();
-      }
+      // Artık mühürlü tahminler de feed'de göründüğü için her durumda yenileyelim
+      loadFeed();
+      loadMyPredictions();
     } catch (err) {
       console.error(err);
       predictionMessageEl.textContent =
@@ -329,5 +404,6 @@ document.addEventListener('DOMContentLoaded', () => {
   loadCategories();
   if (authToken) {
     loadFeed();
+    loadMyPredictions();
   }
 });
