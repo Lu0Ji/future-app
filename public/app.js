@@ -1,7 +1,8 @@
-// Basit frontend: auth, tahmin oluşturma, feed, "benim tahminlerim" ve takip ettiğim kullanıcılar + profil
+// Frontend: auth, tahmin, feed, benim tahminlerim, takip ettiklerim, profil ve DM
 
 let authToken = null;
 let currentUser = null;
+let currentDmUser = null; // seçili DM kullanıcısı
 
 document.addEventListener('DOMContentLoaded', () => {
   const userInfoEl = document.getElementById('user-info');
@@ -23,6 +24,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const followingListEl = document.getElementById('following-list');
   const profileDetailsEl = document.getElementById('profile-details');
 
+  const dmSelectedUserEl = document.getElementById('dm-selected-user');
+  const dmMessagesEl = document.getElementById('dm-messages');
+  const dmForm = document.getElementById('dm-form');
+  const dmInputEl = document.getElementById('dm-input');
+  const dmStatusEl = document.getElementById('dm-message-status');
+
   // LocalStorage'dan auth bilgisi yükle
   const stored = localStorage.getItem('auth');
   if (stored) {
@@ -39,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function setAuth(token, user) {
     authToken = token || null;
     currentUser = user || null;
+    currentDmUser = null;
 
     if (token && user) {
       localStorage.setItem('auth', JSON.stringify({ token, user }));
@@ -68,6 +76,11 @@ document.addEventListener('DOMContentLoaded', () => {
         '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
       profileDetailsEl.innerHTML =
         '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+      dmSelectedUserEl.textContent =
+        'Henüz bir kullanıcı seçmediniz. Sağ taraftan "Takip ettiklerim" listesinden birini seçip mesajlaşabilirsiniz.';
+      dmMessagesEl.innerHTML = '<p class="small">Mesaj yok.</p>';
+      dmStatusEl.textContent = '';
+      dmStatusEl.className = 'message';
     } else {
       userInfoEl.textContent = `Merhaba, ${currentUser.username}`;
       logoutBtn.style.display = 'inline-block';
@@ -77,11 +90,14 @@ document.addEventListener('DOMContentLoaded', () => {
       predictionMessageEl.textContent = '';
       predictionMessageEl.className = 'message';
 
-      // Giriş yaptıktan sonra feed, kendi tahminlerim, takip ettiklerim ve profil
       loadFeed();
       loadMyPredictions();
       loadFollowing();
-      loadUserProfile(currentUser.id); // varsayılan olarak kendi profilimiz
+      loadUserProfile(currentUser.id);
+      dmSelectedUserEl.textContent =
+        'Mesajlaşmak için sağ taraftan bir kullanıcı seçin.';
+      dmMessagesEl.innerHTML =
+        '<p class="small">Bir kullanıcı seçilmedi.</p>';
     }
   }
 
@@ -181,7 +197,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Benim tahminlerim
   async function loadMyPredictions() {
     if (!authToken) {
       myPredictionsListEl.innerHTML =
@@ -247,7 +262,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Takip ettiklerim
   async function loadFollowing() {
     if (!authToken) {
       followingListEl.innerHTML =
@@ -281,12 +295,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.className = 'feed-item';
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.textContent = 'Profili gör';
-        btn.style.marginTop = '6px';
-        btn.addEventListener('click', () => {
+        const profileBtn = document.createElement('button');
+        profileBtn.type = 'button';
+        profileBtn.textContent = 'Profili gör';
+        profileBtn.style.marginTop = '6px';
+        profileBtn.addEventListener('click', () => {
           loadUserProfile(u.id);
+        });
+
+        const dmBtn = document.createElement('button');
+        dmBtn.type = 'button';
+        dmBtn.textContent = 'Mesajlaş';
+        dmBtn.style.marginTop = '6px';
+        dmBtn.style.marginLeft = '6px';
+        dmBtn.addEventListener('click', () => {
+          startConversation(u);
         });
 
         div.innerHTML = `
@@ -299,7 +322,12 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="feed-content small">${u.email || ''}</div>
         `;
 
-        div.appendChild(btn);
+        const btnWrapper = document.createElement('div');
+        btnWrapper.style.marginTop = '4px';
+        btnWrapper.appendChild(profileBtn);
+        btnWrapper.appendChild(dmBtn);
+
+        div.appendChild(btnWrapper);
         followingListEl.appendChild(div);
       });
     } catch (err) {
@@ -309,7 +337,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Profil detayı
   async function loadUserProfile(userId) {
     if (!authToken) {
       profileDetailsEl.innerHTML =
@@ -370,6 +397,135 @@ document.addEventListener('DOMContentLoaded', () => {
         '<p class="small">Profil yüklenirken bir hata oluştu.</p>';
     }
   }
+
+  // DM başlat
+  function startConversation(user) {
+    currentDmUser = user;
+    dmStatusEl.textContent = '';
+    dmStatusEl.className = 'message';
+
+    dmSelectedUserEl.textContent = `${user.username} ile mesajlaşma`;
+    loadConversation(user.id);
+  }
+
+  // DM konuşmasını yükle
+  async function loadConversation(userId) {
+    if (!authToken) {
+      dmMessagesEl.innerHTML =
+        '<p class="small">Mesajlaşmak için önce giriş yapın.</p>';
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/messages/conversation/${userId}`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Mesajlar yüklenemedi.');
+      }
+
+      const messages = data.messages || [];
+      if (messages.length === 0) {
+        dmMessagesEl.innerHTML =
+          '<p class="small">Henüz mesaj yok. İlk mesajı siz gönderebilirsiniz.</p>';
+        return;
+      }
+
+      dmMessagesEl.innerHTML = '';
+      messages.forEach((m) => {
+        const div = document.createElement('div');
+        div.className = 'dm-message' + (m.fromSelf ? ' self' : '');
+
+        const timeStr = new Date(m.createdAt)
+          .toISOString()
+          .split('T')[1]
+          .slice(0, 5);
+
+        div.innerHTML = `
+          <div class="dm-message-meta">
+            ${m.fromSelf ? 'Siz' : currentDmUser?.username || 'Karşı taraf'} · ${timeStr}
+          </div>
+          <div class="dm-message-content">${m.content}</div>
+        `;
+
+        dmMessagesEl.appendChild(div);
+      });
+
+      // Listeyi en alta kaydır
+      dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+    } catch (err) {
+      console.error(err);
+      dmMessagesEl.innerHTML =
+        '<p class="small">Mesajlar yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
+  // DM formu gönderme
+  dmForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    dmStatusEl.textContent = '';
+    dmStatusEl.className = 'message';
+
+    if (!authToken) {
+      dmStatusEl.textContent = 'Mesaj göndermek için önce giriş yapın.';
+      dmStatusEl.className = 'message error';
+      return;
+    }
+
+    if (!currentDmUser) {
+      dmStatusEl.textContent =
+        'Önce sağ taraftan bir kullanıcı seçin.';
+      dmStatusEl.className = 'message error';
+      return;
+    }
+
+    const content = dmInputEl.value.trim();
+    if (!content) {
+      dmStatusEl.textContent = 'Boş mesaj gönderemezsiniz.';
+      dmStatusEl.className = 'message error';
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/messages/${currentDmUser.id}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ content }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        dmStatusEl.textContent =
+          data.error || 'Mesaj gönderilemedi.';
+        dmStatusEl.className = 'message error';
+        return;
+      }
+
+      dmInputEl.value = '';
+      dmStatusEl.textContent = 'Mesaj gönderildi.';
+      dmStatusEl.className = 'message success';
+
+      // Konuşmayı yeniden yükle
+      loadConversation(currentDmUser.id);
+    } catch (err) {
+      console.error(err);
+      dmStatusEl.textContent =
+        'Mesaj gönderilirken bir hata oluştu.';
+      dmStatusEl.className = 'message error';
+    }
+  });
 
   // Kayıt formu
   registerForm.addEventListener('submit', async (e) => {
@@ -521,7 +677,6 @@ document.addEventListener('DOMContentLoaded', () => {
       predictionMessageEl.className = 'message success';
       predictionForm.reset();
 
-      // Tahminlerden sonra feed ve benim tahminlerim güncellensin
       loadFeed();
       loadMyPredictions();
     } catch (err) {

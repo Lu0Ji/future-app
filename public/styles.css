@@ -120,14 +120,16 @@
     }
     #feed-list,
     #my-predictions-list,
-    #following-list {
+    #following-list,
+    #dm-messages {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      max-height: 480px;
+      max-height: 320px;
       overflow-y: auto;
       padding-right: 4px;
     }
+
 
 
     .feed-item {
@@ -171,3 +173,25 @@
         grid-template-columns: 1fr;
       }
     }
+
+    .dm-message {
+  border-radius: 10px;
+  border: 1px solid #1f2937;
+  padding: 6px 8px;
+  background: #020617;
+  font-size: 12px;
+}
+
+.dm-message.self {
+  border-color: #4f46e5;
+}
+
+.dm-message-meta {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 2px;
+}
+
+.dm-message-content {
+  font-size: 13px;
+}
