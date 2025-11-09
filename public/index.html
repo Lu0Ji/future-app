@@ -126,14 +126,16 @@
       opacity: 0.5;
     }
     #feed-list,
-    #my-predictions-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-height: 480px;
-    overflow-y: auto;
-    padding-right: 4px;
+    #my-predictions-list,
+    #following-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 480px;
+      overflow-y: auto;
+      padding-right: 4px;
     }
+
 
     .feed-item {
       border-radius: 10px;
@@ -257,15 +259,31 @@
             Geçmiş tarihe tahmin yapılamaz. Tahminler hedef tarihe kadar gizli kalır, sadece hedef tarih geldiğinde feed’de görünür.
           </p>
         </section>
+
+        <section id="profile-section">
+          <h2>Profil</h2>
+          <div id="profile-details">
+            <p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerine tıklayın.</p>
+          </div>
+        </section>
+
       </div>
 
       <!-- Sağ taraf: Feed -->
             <!-- Sağ taraf: Feed + Benim tahminlerim -->
+            <!-- Sağ taraf: Feed + Takip ettiklerim + Benim tahminlerim -->
       <div>
         <section id="feed-section">
           <h2>Feed (takip ettiklerin + sen)</h2>
           <div id="feed-list">
             <p class="small">Henüz veri yok. Giriş yapıp tahmin oluşturduktan sonra burada görünecek.</p>
+          </div>
+        </section>
+
+        <section id="following-section">
+          <h2>Takip ettiklerim</h2>
+          <div id="following-list">
+            <p class="small">Henüz kimseyi takip etmiyorsunuz.</p>
           </div>
         </section>
 
@@ -276,6 +294,7 @@
           </div>
         </section>
       </div>
+
 
 
     </main>

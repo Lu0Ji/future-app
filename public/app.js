@@ -1,4 +1,4 @@
-// Basit frontend: auth, tahmin oluşturma, feed ve "benim tahminlerim" görünümü
+// Basit frontend: auth, tahmin oluşturma, feed, "benim tahminlerim" ve takip ettiğim kullanıcılar + profil
 
 let authToken = null;
 let currentUser = null;
@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const feedListEl = document.getElementById('feed-list');
   const myPredictionsListEl = document.getElementById('my-predictions-list');
+  const followingListEl = document.getElementById('following-list');
+  const profileDetailsEl = document.getElementById('profile-details');
 
   // LocalStorage'dan auth bilgisi yükle
   const stored = localStorage.getItem('auth');
@@ -57,10 +59,15 @@ document.addEventListener('DOMContentLoaded', () => {
       predictionMessageEl.textContent =
         'Tahmin göndermek için giriş yapmanız gerekiyor.';
       predictionMessageEl.className = 'message error';
+
       feedListEl.innerHTML =
         '<p class="small">Feed için önce giriş yapın.</p>';
       myPredictionsListEl.innerHTML =
         '<p class="small">Tahminlerinizi görmek için önce giriş yapın.</p>';
+      followingListEl.innerHTML =
+        '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
+      profileDetailsEl.innerHTML =
+        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
     } else {
       userInfoEl.textContent = `Merhaba, ${currentUser.username}`;
       logoutBtn.style.display = 'inline-block';
@@ -70,9 +77,11 @@ document.addEventListener('DOMContentLoaded', () => {
       predictionMessageEl.textContent = '';
       predictionMessageEl.className = 'message';
 
-      // Giriş yaptıktan sonra feed ve kendi tahminlerimizi yükleyelim
+      // Giriş yaptıktan sonra feed, kendi tahminlerim, takip ettiklerim ve profil
       loadFeed();
       loadMyPredictions();
+      loadFollowing();
+      loadUserProfile(currentUser.id); // varsayılan olarak kendi profilimiz
     }
   }
 
@@ -129,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const items = data.data || [];
       if (items.length === 0) {
         feedListEl.innerHTML =
-          '<p class="small">Takip ettiklerinden veya senden, zamanı gelmiş ya da mühürlü tahmin bulunmuyor.</p>';
+          '<p class="small">Takip ettiklerinden veya senden, tahmin bulunmuyor.</p>';
         return;
       }
 
@@ -235,6 +244,130 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error(err);
       myPredictionsListEl.innerHTML =
         '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
+  // Takip ettiklerim
+  async function loadFollowing() {
+    if (!authToken) {
+      followingListEl.innerHTML =
+        '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/follow/following', {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Takip ettikleriniz yüklenemedi.');
+      }
+
+      const items = data.following || [];
+      if (items.length === 0) {
+        followingListEl.innerHTML =
+          '<p class="small">Henüz kimseyi takip etmiyorsunuz.</p>';
+        return;
+      }
+
+      followingListEl.innerHTML = '';
+
+      items.forEach((u) => {
+        const div = document.createElement('div');
+        div.className = 'feed-item';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'Profili gör';
+        btn.style.marginTop = '6px';
+        btn.addEventListener('click', () => {
+          loadUserProfile(u.id);
+        });
+
+        div.innerHTML = `
+          <div class="feed-header">
+            <span class="feed-user">${u.username}</span>
+            <span class="feed-date small">Takip edildi: ${
+              new Date(u.followedAt).toISOString().split('T')[0]
+            }</span>
+          </div>
+          <div class="feed-content small">${u.email || ''}</div>
+        `;
+
+        div.appendChild(btn);
+        followingListEl.appendChild(div);
+      });
+    } catch (err) {
+      console.error(err);
+      followingListEl.innerHTML =
+        '<p class="small">Takip ettikleriniz yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
+  // Profil detayı
+  async function loadUserProfile(userId) {
+    if (!authToken) {
+      profileDetailsEl.innerHTML =
+        '<p class="small">Profil görmek için önce giriş yapın.</p>';
+      return;
+    }
+
+    if (!userId) {
+      profileDetailsEl.innerHTML =
+        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Profil yüklenemedi.');
+      }
+
+      const createdStr = new Date(data.createdAt)
+        .toISOString()
+        .split('T')[0];
+
+      profileDetailsEl.innerHTML = `
+        <div class="feed-item">
+          <div class="feed-header">
+            <span class="feed-user">${data.username}</span>
+            <span class="feed-date">Katılım: ${createdStr}</span>
+          </div>
+          <div class="feed-content">
+            <div class="small">${data.email || ''}</div>
+            <div class="small">
+              Tahmin sayısı: <strong>${data.predictionCount}</strong><br/>
+              Takipçi: <strong>${data.followerCount}</strong> · Takip ettikleri: <strong>${data.followingCount}</strong>
+            </div>
+          </div>
+          <div class="feed-footer">
+            ${
+              data.isMe
+                ? 'Bu sizsiniz.'
+                : data.isFollowing
+                ? 'Takip ediyorsunuz.'
+                : 'Takip etmiyorsunuz.'
+            }
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      console.error(err);
+      profileDetailsEl.innerHTML =
+        '<p class="small">Profil yüklenirken bir hata oluştu.</p>';
     }
   }
 
@@ -388,7 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
       predictionMessageEl.className = 'message success';
       predictionForm.reset();
 
-      // Artık mühürlü tahminler de feed'de göründüğü için her durumda yenileyelim
+      // Tahminlerden sonra feed ve benim tahminlerim güncellensin
       loadFeed();
       loadMyPredictions();
     } catch (err) {
@@ -405,5 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (authToken) {
     loadFeed();
     loadMyPredictions();
+    loadFollowing();
+    loadUserProfile(currentUser?.id);
   }
 });
