@@ -194,3 +194,27 @@
 .dm-message-content {
   font-size: 13px;
 }
+
+.filters-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.filters-row select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background-color: #111827;
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.filters-row button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+}

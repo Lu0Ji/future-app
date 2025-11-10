@@ -64,6 +64,13 @@
           <h2>Yeni tahmin oluştur</h2>
           <form id="prediction-form">
             <label for="prediction-content">Tahmin metni</label>
+              <label for="prediction-title">Başlık</label>
+              <input
+                type="text"
+                id="prediction-title"
+                placeholder="Kısa bir başlık / özet yazın..."
+              />
+
             <textarea id="prediction-content" required placeholder="Örn: 2026 yılında X şirketinin hissesi %50 artacak..."></textarea>
 
             <div class="row">
@@ -140,6 +147,24 @@
 
         <section id="my-predictions-section">
           <h2>Benim tahminlerim</h2>
+          <div id="my-predictions-filters" class="filters-row">
+            <select id="my-predictions-filter-category">
+              <option value="">Tüm kategoriler</option>
+              <!-- JS ile dolduracağız -->
+            </select>
+
+            <select id="my-predictions-filter-status">
+              <option value="">Tüm durumlar</option>
+              <option value="pending">Bekliyor</option>
+              <option value="correct">Doğru</option>
+              <option value="incorrect">Yanlış</option>
+            </select>
+
+            <button id="my-predictions-clear-filters" type="button">
+              Temizle
+            </button>
+          </div>
+
           <div id="my-predictions-list">
             <p class="small">Henüz tahmininiz yok.</p>
           </div>

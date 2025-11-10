@@ -15,9 +15,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const predictionSection = document.getElementById('prediction-section');
   const predictionForm = document.getElementById('prediction-form');
   const predictionContentEl = document.getElementById('prediction-content');
+  const predictionTitleEl = document.getElementById('prediction-title');
+
+  const myPredictionsFilterCategoryEl = document.getElementById(
+    'my-predictions-filter-category'
+  );
+  const myPredictionsFilterStatusEl = document.getElementById(
+    'my-predictions-filter-status'
+  );
+  const myPredictionsClearFiltersBtn = document.getElementById(
+    'my-predictions-clear-filters'
+  );
+    if (myPredictionsFilterCategoryEl && myPredictionsFilterStatusEl) {
+    const triggerFilter = () => {
+      loadMyPredictions({
+        category: myPredictionsFilterCategoryEl.value || undefined,
+        status: myPredictionsFilterStatusEl.value || undefined,
+      });
+    };
+
+    myPredictionsFilterCategoryEl.addEventListener('change', triggerFilter);
+    myPredictionsFilterStatusEl.addEventListener('change', triggerFilter);
+
+    if (myPredictionsClearFiltersBtn) {
+      myPredictionsClearFiltersBtn.addEventListener('click', () => {
+        myPredictionsFilterCategoryEl.value = '';
+        myPredictionsFilterStatusEl.value = '';
+        loadMyPredictions(); // filtresiz
+      });
+    }
+  }
+
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
   const predictionMessageEl = document.getElementById('prediction-message');
+  
+
 
   const feedListEl = document.getElementById('feed-list');
   const myPredictionsListEl = document.getElementById('my-predictions-list');
@@ -105,36 +138,58 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function loadCategories() {
-    try {
-      const res = await fetch('/api/categories');
-      const data = await res.json();
+    async function loadCategories() {
+  try {
+    const res = await fetch('/api/categories');
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Kategori yüklenemedi.');
+    }
+
+    // 🔹 Tahmin formundaki kategori select'i doldur
+    if (categorySelectEl) {
       categorySelectEl.innerHTML = '';
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Kategori yüklenemedi.');
-      }
-
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = 'Kategori seçin';
-      categorySelectEl.appendChild(placeholder);
-
-      (data.data || []).forEach((cat) => {
+      data.data.forEach((cat) => {
         const opt = document.createElement('option');
         opt.value = cat.key;
         opt.textContent = cat.label;
         categorySelectEl.appendChild(opt);
       });
-    } catch (err) {
-      console.error(err);
+    }
+
+    // 🔹 "Benim tahminlerim" filtresi için kategori select'i doldur
+    if (myPredictionsFilterCategoryEl) {
+      myPredictionsFilterCategoryEl.innerHTML = '';
+
+      const allOpt = document.createElement('option');
+      allOpt.value = '';
+      allOpt.textContent = 'Tüm kategoriler';
+      myPredictionsFilterCategoryEl.appendChild(allOpt);
+
+      data.data.forEach((cat) => {
+        const opt = document.createElement('option');
+        opt.value = cat.key;
+        opt.textContent = cat.label;
+        myPredictionsFilterCategoryEl.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    console.error('Kategori yükleme hatası:', err);
+
+    // Hata olursa en azından select boş kalmasın
+    if (categorySelectEl) {
       categorySelectEl.innerHTML = '';
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = 'Kategori yüklenemedi';
+      opt.textContent = 'Yüklenemedi';
       categorySelectEl.appendChild(opt);
     }
   }
+}
+
+
 
   async function loadFeed() {
     if (!authToken) {
@@ -201,15 +256,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function loadMyPredictions() {
+  async function loadMyPredictions(options = {}) {
     if (!authToken) {
       myPredictionsListEl.innerHTML =
-        '<p class="small">Tahminlerinizi görmek için önce giriş yapın.</p>';
+        '<p class="small">Tahminlerinizi görmek için giriş yapın.</p>';
       return;
     }
 
     try {
-      const res = await fetch('/api/predictions/mine', {
+      const params = new URLSearchParams();
+      if (options.category) params.append('category', options.category);
+      if (options.status) params.append('status', options.status);
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
+
+      const res = await fetch(`/api/predictions/mine${qs}`, {
         headers: {
           Authorization: `Bearer ${authToken}`,
         },
@@ -222,9 +283,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const items = data.data || [];
+
       if (items.length === 0) {
         myPredictionsListEl.innerHTML =
-          '<p class="small">Henüz tahmininiz yok.</p>';
+          '<p class="small">Henüz tahmininiz yok (veya filtrelere uyan tahmin bulunamadı).</p>';
         return;
       }
 
@@ -234,27 +296,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.className = 'feed-item';
 
-        const statusLabel = p.isLocked
-          ? 'Mühürlü'
-          : p.status === 'correct'
-          ? 'Doğru'
-          : p.status === 'incorrect'
-          ? 'Yanlış'
-          : 'Bekliyor';
+        const statusLabel =
+          p.status === 'correct'
+            ? 'Doğru'
+            : p.status === 'incorrect'
+            ? 'Yanlış'
+            : 'Bekliyor';
 
-        const contentText = p.isLocked
-          ? 'Mühürlü tahmin. İçerik açılma tarihinde görünecek.'
+        const headerTitle = p.isLocked
+          ? 'Mühürlü tahmin'
+          : p.title || '(Başlık yok)';
+
+        const contentHtml = p.isLocked
+          ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
           : p.content;
-
-        const lockTag = p.isLocked ? ' 🔒' : '';
 
         div.innerHTML = `
           <div class="feed-header">
-            <span class="feed-category">${p.category}${lockTag}</span>
-            <span class="feed-date">${p.targetDate}</span>
+            <span class="feed-category">${p.category}</span>
+            <span class="feed-date">${p.targetDate || ''}</span>
           </div>
-          <div class="feed-content">${contentText}</div>
-          <div class="feed-footer">Durum: ${statusLabel}</div>
+          <div class="feed-content">
+            <strong>${headerTitle}</strong>
+            <div>${contentHtml}</div>
+          </div>
+          <div class="feed-footer">
+            Durum: ${statusLabel}
+          </div>
         `;
 
         myPredictionsListEl.appendChild(div);
@@ -265,6 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
     }
   }
+
 
   async function loadFollowing() {
     if (!authToken) {
@@ -717,62 +786,80 @@ document.addEventListener('DOMContentLoaded', () => {
     authMessageEl.className = 'message';
   });
 
-  // Tahmin formu
-  predictionForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    predictionMessageEl.textContent = '';
-    predictionMessageEl.className = 'message';
+// Tahmin formu
+predictionForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  predictionMessageEl.textContent = '';
+  predictionMessageEl.className = 'message';
 
-    if (!authToken) {
+  // 🔐 Giriş kontrolü
+  if (!authToken) {
+    predictionMessageEl.textContent =
+      'Tahmin göndermek için önce giriş yapın.';
+    predictionMessageEl.className = 'message error';
+    return;
+  }
+
+  // 🆕 Başlık + içerik + tarih + kategori
+  const title = predictionTitleEl.value.trim();          // <--- yeni satır
+  const content = predictionContentEl.value.trim();
+  const targetDate = predictionDateEl.value;
+  const category = categorySelectEl.value;
+
+  // 🧪 Validasyon
+  if (!title) {
+    predictionMessageEl.textContent = 'Lütfen bir başlık girin.';
+    predictionMessageEl.className = 'message error';
+    return;
+  }
+
+  if (!content || !targetDate || !category) {
+    predictionMessageEl.textContent =
+      'Lütfen tahmin, tarih ve kategoriyi doldurun.';
+    predictionMessageEl.className = 'message error';
+    return;
+  }
+
+  // 📤 API isteği
+  try {
+    const res = await fetch('/api/predictions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ title, content, targetDate, category }), // <-- title da gidiyor
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
       predictionMessageEl.textContent =
-        'Tahmin göndermek için önce giriş yapın.';
+        data.error || 'Tahmin oluşturulamadı.';
       predictionMessageEl.className = 'message error';
       return;
     }
 
-    const content = predictionContentEl.value.trim();
-    const targetDate = predictionDateEl.value;
-    const category = categorySelectEl.value;
+    predictionMessageEl.textContent = 'Tahmin başarıyla mühürlendi.';
+    predictionMessageEl.className = 'message success';
 
-    if (!content || !targetDate || !category) {
-      predictionMessageEl.textContent =
-        'Lütfen tahmin, tarih ve kategoriyi doldurun.';
-      predictionMessageEl.className = 'message error';
-      return;
-    }
+    // Formu sıfırla
+    predictionForm.reset();
+    // (İstersen ekstra güvenlik için:)
+    // predictionTitleEl.value = '';
+    // predictionContentEl.value = '';
 
-    try {
-      const res = await fetch('/api/predictions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ content, targetDate, category }),
-      });
+    // Listeleri güncelle
+    loadFeed();
+    loadMyPredictions();
+  } catch (err) {
+    console.error(err);
+    predictionMessageEl.textContent =
+      'Tahmin gönderilirken bir hata oluştu.';
+    predictionMessageEl.className = 'message error';
+  }
+});
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        predictionMessageEl.textContent =
-          data.error || 'Tahmin oluşturulamadı.';
-        predictionMessageEl.className = 'message error';
-        return;
-      }
-
-      predictionMessageEl.textContent = 'Tahmin başarıyla mühürlendi.';
-      predictionMessageEl.className = 'message success';
-      predictionForm.reset();
-
-      loadFeed();
-      loadMyPredictions();
-    } catch (err) {
-      console.error(err);
-      predictionMessageEl.textContent =
-        'Tahmin gönderilirken bir hata oluştu.';
-      predictionMessageEl.className = 'message error';
-    }
-  });
 
   // İlk yüklemede UI ve kategoriler
   updateAuthUI();

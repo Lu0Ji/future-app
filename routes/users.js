@@ -63,6 +63,7 @@ router.get('/:id/predictions', auth, async (req, res) => {
 
     const data = opened.map((p) => ({
       id: p._id,
+      title: p.title || null,
       content: p.content,
       category: p.category,
       targetDate: p.targetDate
@@ -74,6 +75,7 @@ router.get('/:id/predictions', auth, async (req, res) => {
       status: p.status || 'pending',
       resolvedAt: p.resolvedAt || null,
     }));
+
 
     return res.json({
       userId: user._id,

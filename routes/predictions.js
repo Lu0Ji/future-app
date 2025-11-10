@@ -2,190 +2,210 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const Prediction = require('../models/Prediction');
-const categories = require('../config/categories');
+const categoriesConfig = require('../config/categories');
 
-const allowedCategoryKeys = categories.map((c) => c.key);
+const allowedCategoryKeys = categoriesConfig.map((c) => c.key);
 
-// POST /api/predictions -> tahmin oluşturma (sadece login kullanıcı)
+// Ortak helper: mühürlü mü?
+function isLocked(prediction) {
+  if (!prediction.targetDate) return true;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const targetStr = prediction.targetDate.toISOString().split('T')[0];
+  return targetStr > todayStr;
+}
+
+// POST /api/predictions  -> tahmin oluştur
 router.post('/', auth, async (req, res) => {
   try {
-    const { content, targetDate, category } = req.body;
+    const { title, content, targetDate, category } = req.body;
 
-    if (!content || !targetDate || !category) {
+    if (!title || !title.trim() || !content || !content.trim() || !targetDate || !category) {
       return res
         .status(400)
-        .json({ error: 'Content, targetDate and category are required.' });
+        .json({ error: 'Title, content, targetDate ve category zorunlu.' });
     }
 
     if (!allowedCategoryKeys.includes(category)) {
-      return res.status(400).json({ error: 'Invalid category.' });
-    }
-
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // targetDate "YYYY-MM-DD" formatında geliyor (input[type="date"])
-    if (targetDate < todayStr) {
-      return res
-        .status(400)
-        .json({ error: 'Target date must be today or in the future.' });
+      return res.status(400).json({ error: 'Geçersiz kategori.' });
     }
 
     const target = new Date(targetDate);
+    if (Number.isNaN(target.getTime())) {
+      return res.status(400).json({ error: 'targetDate formatı geçersiz.' });
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const targetStr = target.toISOString().split('T')[0];
+    if (targetStr < todayStr) {
+      return res.status(400).json({
+        error: 'Hedef tarih bugün veya gelecek bir gün olmalı.',
+      });
+    }
 
     const prediction = await Prediction.create({
       user: req.user.id,
+      title: title.trim(),
+      content: content.trim(),
       category,
-      content,
       targetDate: target,
     });
 
     return res.status(201).json({
-      message: 'Prediction created',
+      message: 'Prediction created.',
       data: {
         id: prediction._id,
-        userId: req.user.id,
-        username: req.user.username,
-        category,
+        title: prediction.title,
         content: prediction.content,
-        targetDate,
-        createdAt: prediction.createdAt,
+        category: prediction.category,
+        targetDate: prediction.targetDate.toISOString().split('T')[0],
         status: prediction.status,
+        createdAt: prediction.createdAt,
       },
     });
-  } catch (error) {
-    console.error('Create prediction error:', error);
+  } catch (err) {
+    console.error('Create prediction error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
-// GET /api/predictions/mine -> login kullanıcının tüm tahminleri
-// Not: Gelecekteki tahminlerin İÇERİĞİ (content) kimseye gösterilmez.
+// GET /api/predictions/mine  -> benim tahminlerim (filtreli)
 router.get('/mine', auth, async (req, res) => {
   try {
-    const { status, category } = req.query;
+    const currentUserId = req.user.id;
+    const { category, status } = req.query;
 
-    const filter = { user: req.user.id };
-
-    if (status && ['pending', 'correct', 'incorrect'].includes(status)) {
-      filter.status = status;
-    }
+    const filter = { user: currentUserId };
 
     if (category && allowedCategoryKeys.includes(category)) {
       filter.category = category;
     }
 
+    if (status && ['pending', 'correct', 'incorrect'].includes(status)) {
+      filter.status = status;
+    }
+
     const predictions = await Prediction.find(filter)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     const todayStr = new Date().toISOString().split('T')[0];
 
     const data = predictions.map((p) => {
-      const targetStr = p.targetDate.toISOString().split('T')[0];
-      const isLocked = targetStr > todayStr; // gelecekte ise mühürlü
+      const targetStr = p.targetDate
+        ? p.targetDate.toISOString().split('T')[0]
+        : null;
+      const locked = targetStr ? targetStr > todayStr : true;
 
       return {
         id: p._id,
+        // Mühürlü ise başlık ve içerik yok
+        title: locked ? null : (p.title || null),
+        content: locked ? null : p.content,
         category: p.category,
-        // MÜHÜRLÜYSE içeriği asla göstermiyoruz:
-        content: isLocked ? null : p.content,
-        isLocked,
         targetDate: targetStr,
         createdAt: p.createdAt,
         status: p.status || 'pending',
+        isLocked: locked,
         resolvedAt: p.resolvedAt || null,
       };
     });
 
     return res.json({
-      userId: req.user.id,
-      username: req.user.username,
+      userId: currentUserId,
       count: data.length,
       data,
     });
-  } catch (error) {
-    console.error('Get my predictions error:', error);
+  } catch (err) {
+    console.error('Get my predictions error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
-
-
-// GET /api/predictions -> sadece TARİHİ GELMİŞ tahminler (herkese açık)
-router.get('/', async (req, res) => {
+// GET /api/predictions/:id  -> detay endpoint
+router.get('/:id', auth, async (req, res) => {
   try {
-    // Tüm tahminleri al
-    const predictions = await Prediction.find()
-      .populate('user', 'username')
-      .sort({ targetDate: 1 });
+    const id = req.params.id;
 
-    // Bugünün tarihini string olarak al (YYYY-MM-DD)
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Sadece tarihi bugünden küçük/eşit olanları göster
-    const visible = predictions.filter((p) => {
-      const targetStr = p.targetDate.toISOString().split('T')[0];
-      return targetStr <= todayStr;
-    });
-
-    const data = visible.map((p) => ({
-      id: p._id,
-      userId: p.user._id,
-      username: p.user.username,
-      category: p.category,
-      content: p.content,
-      targetDate: p.targetDate.toISOString().split('T')[0],
-      createdAt: p.createdAt,
-      status: p.status || 'pending',
-      resolvedAt: p.resolvedAt || null,
-    }));
-
-    return res.json({
-      count: data.length,
-      data,
-    });
-  } catch (error) {
-    console.error('Get predictions error:', error);
-    return res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// PATCH /api/predictions/:id/resolve -> tahmini doğru/yanlış işaretle
-router.patch('/:id/resolve', auth, async (req, res) => {
-  try {
-    const { status } = req.body;
-
-    if (!['correct', 'incorrect'].includes(status)) {
-      return res
-        .status(400)
-        .json({ error: 'Status must be "correct" or "incorrect".' });
-    }
-
-    const prediction = await Prediction.findById(req.params.id);
+    const prediction = await Prediction.findById(id)
+      .populate('user', '_id username email createdAt')
+      .lean();
 
     if (!prediction) {
       return res.status(404).json({ error: 'Prediction not found.' });
     }
 
-    // Sadece sahibi çözebilsin
-    if (prediction.user.toString() !== req.user.id) {
-      return res
-        .status(403)
-        .json({ error: 'You are not allowed to modify this prediction.' });
-    }
+    const locked = isLocked(prediction);
 
-    // Hedef tarih gelmeden çözmeye izin verme
-    const todayStr = new Date().toISOString().split('T')[0];
-    const targetStr = prediction.targetDate.toISOString().split('T')[0];
+    const targetStr = prediction.targetDate
+      ? prediction.targetDate.toISOString().split('T')[0]
+      : null;
 
-    if (targetStr > todayStr) {
+    return res.json({
+      id: prediction._id,
+      user: prediction.user
+        ? {
+            id: prediction.user._id,
+            username: prediction.user.username,
+            email: prediction.user.email,
+            createdAt: prediction.user.createdAt,
+          }
+        : null,
+      title: locked ? null : (prediction.title || null),
+      content: locked ? null : prediction.content,
+      category: prediction.category,
+      targetDate: targetStr,
+      createdAt: prediction.createdAt,
+      status: prediction.status || 'pending',
+      resolvedAt: prediction.resolvedAt || null,
+      isLocked: locked,
+    });
+  } catch (err) {
+    console.error('Get prediction detail error:', err);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// PATCH /api/predictions/:id/resolve -> doğru / yanlış işaretleme
+router.patch('/:id/resolve', auth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const currentUserId = req.user.id;
+    const { status } = req.body;
+
+    if (!['correct', 'incorrect'].includes(status)) {
       return res
         .status(400)
-        .json({ error: 'Prediction cannot be resolved before target date.' });
+        .json({ error: 'Status "correct" veya "incorrect" olmalı.' });
+    }
+
+    const prediction = await Prediction.findOne({
+      _id: id,
+      user: currentUserId,
+    });
+
+    if (!prediction) {
+      return res.status(404).json({ error: 'Prediction not found.' });
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const targetStr = prediction.targetDate
+      ? prediction.targetDate.toISOString().split('T')[0]
+      : null;
+
+    if (!targetStr || targetStr > todayStr) {
+      return res.status(400).json({
+        error: 'Hedef tarihi gelmeden tahmini çözemezsiniz.',
+      });
+    }
+
+    if (prediction.status !== 'pending') {
+      return res
+        .status(400)
+        .json({ error: 'Bu tahmin zaten çözülmüş.' });
     }
 
     prediction.status = status;
     prediction.resolvedAt = new Date();
-
     await prediction.save();
 
     return res.json({
@@ -196,8 +216,8 @@ router.patch('/:id/resolve', auth, async (req, res) => {
         resolvedAt: prediction.resolvedAt,
       },
     });
-  } catch (error) {
-    console.error('Resolve prediction error:', error);
+  } catch (err) {
+    console.error('Resolve prediction error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
