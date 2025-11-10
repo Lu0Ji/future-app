@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const myPredictionsListEl = document.getElementById('my-predictions-list');
   const followingListEl = document.getElementById('following-list');
   const profileDetailsEl = document.getElementById('profile-details');
+  const profilePredictionsEl = document.getElementById('profile-predictions');
 
   const dmSelectedUserEl = document.getElementById('dm-selected-user');
   const dmMessagesEl = document.getElementById('dm-messages');
@@ -76,6 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
         '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
       profileDetailsEl.innerHTML =
         '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+      profilePredictionsEl.innerHTML =
+        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+
       dmSelectedUserEl.textContent =
         'Henüz bir kullanıcı seçmediniz. Sağ taraftan "Takip ettiklerim" listesinden birini seçip mesajlaşabilirsiniz.';
       dmMessagesEl.innerHTML = '<p class="small">Mesaj yok.</p>';
@@ -337,15 +341,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function loadUserProfile(userId) {
+    async function loadUserProfile(userId) {
     if (!authToken) {
       profileDetailsEl.innerHTML =
         '<p class="small">Profil görmek için önce giriş yapın.</p>';
+      profilePredictionsEl.innerHTML =
+        '<p class="small">Profil tahminlerini görmek için önce giriş yapın.</p>';
       return;
     }
 
     if (!userId) {
       profileDetailsEl.innerHTML =
+        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+      profilePredictionsEl.innerHTML =
         '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
       return;
     }
@@ -391,12 +399,91 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
       `;
+
+      // ✅ Profil yüklendikten sonra, aynı kullanıcı için açılmış tahminleri getir
+      loadProfilePredictions(userId);
     } catch (err) {
       console.error(err);
       profileDetailsEl.innerHTML =
         '<p class="small">Profil yüklenirken bir hata oluştu.</p>';
+      profilePredictionsEl.innerHTML =
+        '<p class="small">Profil tahminleri yüklenirken bir hata oluştu.</p>';
     }
   }
+
+    async function loadProfilePredictions(userId) {
+    if (!authToken) {
+      profilePredictionsEl.innerHTML =
+        '<p class="small">Profil tahminlerini görmek için önce giriş yapın.</p>';
+      return;
+    }
+
+    if (!userId) {
+      profilePredictionsEl.innerHTML =
+        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/users/${userId}/predictions`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(
+          data.error || 'Profil tahminleri yüklenemedi.'
+        );
+      }
+
+      const items = data.data || [];
+
+      if (items.length === 0) {
+        profilePredictionsEl.innerHTML =
+          '<p class="small">Bu kullanıcının açılmış tahmini yok.</p>';
+        return;
+      }
+
+      profilePredictionsEl.innerHTML = '';
+
+      items.forEach((p) => {
+        const div = document.createElement('div');
+        div.className = 'feed-item';
+
+        const statusLabel =
+          p.status === 'correct'
+            ? 'Doğru'
+            : p.status === 'incorrect'
+            ? 'Yanlış'
+            : 'Bekliyor';
+
+        const createdStr = p.createdAt || '';
+
+        div.innerHTML = `
+          <div class="feed-header">
+            <span class="feed-category">${p.category}</span>
+            <span class="feed-date">${p.targetDate}</span>
+          </div>
+          <div class="feed-content">${p.content}</div>
+          <div class="feed-footer">
+            Durum: ${statusLabel}${
+          createdStr ? ` · Oluşturma: ${createdStr}` : ''
+        }
+          </div>
+        `;
+
+        profilePredictionsEl.appendChild(div);
+      });
+    } catch (err) {
+      console.error(err);
+      profilePredictionsEl.innerHTML =
+        '<p class="small">Profil tahminleri yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
 
   // DM başlat
   function startConversation(user) {

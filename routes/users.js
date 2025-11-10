@@ -5,62 +5,95 @@ const User = require('../models/User');
 const Follow = require('../models/Follow');
 const Prediction = require('../models/Prediction');
 
-// GET /api/users -> kullanıcı arama / listeleme
-// Örnek: /api/users?q=al   (username'de "al" geçenler)
-router.get('/', auth, async (req, res) => {
+// GET /api/users/me - mevcut kullanıcının özeti (şimdilik frontend kullanmasa da dursun)
+router.get('/me', auth, async (req, res) => {
   try {
-    const q = (req.query.q || '').trim();
-    const currentUserId = req.user.id;
+    const userId = req.user.id;
+    const user = await User.findById(userId).select('_id username email createdAt');
 
-    const filter = {};
-
-    if (q.length > 0) {
-      // username içinde arama (büyük-küçük harf duyarsız)
-      filter.username = { $regex: q, $options: 'i' };
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
     }
 
-    // Kendimizi de görebiliriz, sorun yok, sadece şimdilik hepsini 20 ile sınırlayalım
-    const users = await User.find(filter)
-      .select('_id username email createdAt')
-      .sort({ username: 1 })
-      .limit(20);
-
-    const data = [];
-
-    for (const user of users) {
-      // Bu kullanıcıyı takip ediyor muyuz?
-      const isFollowing = await Follow.exists({
-        follower: currentUserId,
-        following: user._id,
-      });
-
-      data.push({
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        createdAt: user.createdAt,
-        isMe: user._id.toString() === currentUserId,
-        isFollowing: !!isFollowing,
-      });
-    }
+    const [predictionCount, followerCount, followingCount] = await Promise.all([
+      Prediction.countDocuments({ user: userId }),
+      Follow.countDocuments({ following: userId }),
+      Follow.countDocuments({ follower: userId }),
+    ]);
 
     return res.json({
-      count: data.length,
-      data,
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      createdAt: user.createdAt,
+      predictionCount,
+      followerCount,
+      followingCount,
+      isMe: true,
+      isFollowing: false,
     });
-  } catch (error) {
-    console.error('User search error:', error);
+  } catch (err) {
+    console.error('Get /users/me error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
-// GET /api/users/:id -> kullanıcının profil özeti
+// GET /api/users/:id/predictions -> profil için AÇILMIŞ tahminler
+router.get('/:id/predictions', auth, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    const user = await User.findById(userId).select('_id username');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const allPredictions = await Prediction.find({ user: userId })
+      .sort({ targetDate: -1, createdAt: -1 })
+      .lean();
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Sadece hedef tarihi bugüne kadar gelmiş olanlar (mühür kalkmış olanlar)
+    const opened = allPredictions.filter((p) => {
+      if (!p.targetDate) return false;
+      const targetStr = p.targetDate.toISOString().split('T')[0];
+      return targetStr <= todayStr;
+    });
+
+    const data = opened.map((p) => ({
+      id: p._id,
+      content: p.content,
+      category: p.category,
+      targetDate: p.targetDate
+        ? p.targetDate.toISOString().split('T')[0]
+        : null,
+      createdAt: p.createdAt
+        ? p.createdAt.toISOString().split('T')[0]
+        : null,
+      status: p.status || 'pending',
+      resolvedAt: p.resolvedAt || null,
+    }));
+
+    return res.json({
+      userId: user._id,
+      username: user.username,
+      count: data.length,
+      data,
+    });
+  } catch (err) {
+    console.error('Get user predictions error:', err);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// GET /api/users/:id -> profil özeti
 router.get('/:id', auth, async (req, res) => {
   try {
-    const targetUserId = req.params.id;
+    const targetId = req.params.id;
     const currentUserId = req.user.id;
 
-    const user = await User.findById(targetUserId).select(
+    const user = await User.findById(targetId).select(
       '_id username email createdAt'
     );
 
@@ -68,31 +101,33 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    // Takipçi / takip edilen sayıları
-    const [followerCount, followingCount, predictionCount, isFollowing] =
+    const [predictionCount, followerCount, followingCount, followRelation] =
       await Promise.all([
-        Follow.countDocuments({ following: targetUserId }),
-        Follow.countDocuments({ follower: targetUserId }),
-        Prediction.countDocuments({ user: targetUserId }),
-        Follow.exists({
+        Prediction.countDocuments({ user: targetId }),
+        Follow.countDocuments({ following: targetId }),
+        Follow.countDocuments({ follower: targetId }),
+        Follow.findOne({
           follower: currentUserId,
-          following: targetUserId,
+          following: targetId,
         }),
       ]);
+
+    const isMe = currentUserId === user._id.toString();
+    const isFollowing = !!followRelation;
 
     return res.json({
       id: user._id,
       username: user.username,
       email: user.email,
       createdAt: user.createdAt,
+      predictionCount,
       followerCount,
       followingCount,
-      predictionCount,
-      isMe: user._id.toString() === currentUserId,
-      isFollowing: !!isFollowing,
+      isMe,
+      isFollowing,
     });
-  } catch (error) {
-    console.error('User profile error:', error);
+  } catch (err) {
+    console.error('Get user profile error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });

@@ -121,7 +121,8 @@
     #feed-list,
     #my-predictions-list,
     #following-list,
-    #dm-messages {
+    #dm-messages,
+    #profile-predictions {
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -129,8 +130,6 @@
       overflow-y: auto;
       padding-right: 4px;
     }
-
-
 
     .feed-item {
       border-radius: 10px;
