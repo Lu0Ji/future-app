@@ -45,12 +45,25 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
   }
+    if (myPredictionsListEl) {
+    myPredictionsListEl.addEventListener('click', (e) => {
+      const item = e.target.closest('.feed-item');
+      if (!item) return;
+
+      const id = item.dataset.id;
+      if (!id) return;
+
+      loadPredictionDetail(id);
+    });
+}
+
 
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
   const predictionMessageEl = document.getElementById('prediction-message');
-  
+  const predictionDetailEl = document.getElementById('prediction-detail');
 
+  
 
   const feedListEl = document.getElementById('feed-list');
   const myPredictionsListEl = document.getElementById('my-predictions-list');
@@ -110,6 +123,11 @@ document.addEventListener('DOMContentLoaded', () => {
         '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
       profileDetailsEl.innerHTML =
         '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
+          if (predictionDetailEl) {
+      predictionDetailEl.innerHTML =
+      '<p class="small">Bir tahmine tıklayarak detayını burada görebilirsiniz.</p>';
+        }
+
       profilePredictionsEl.innerHTML =
         '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
 
@@ -256,83 +274,158 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function loadMyPredictions(options = {}) {
-    if (!authToken) {
+async function loadMyPredictions(options = {}) {
+  if (!authToken) {
+    myPredictionsListEl.innerHTML =
+      '<p class="small">Tahminlerinizi görmek için giriş yapın.</p>';
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams();
+    if (options.category) params.append('category', options.category);
+    if (options.status) params.append('status', options.status);
+
+    const qs = params.toString() ? `?${params.toString()}` : '';
+
+    const res = await fetch(`/api/predictions/mine${qs}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Tahminler yüklenemedi.');
+    }
+
+    const items = data.data || [];
+
+    if (items.length === 0) {
       myPredictionsListEl.innerHTML =
-        '<p class="small">Tahminlerinizi görmek için giriş yapın.</p>';
+        '<p class="small">Henüz tahmininiz yok (veya filtrelere uyan tahmin bulunamadı).</p>';
       return;
     }
 
-    try {
-      const params = new URLSearchParams();
-      if (options.category) params.append('category', options.category);
-      if (options.status) params.append('status', options.status);
+    myPredictionsListEl.innerHTML = '';
 
-      const qs = params.toString() ? `?${params.toString()}` : '';
+    items.forEach((p) => {
+      const div = document.createElement('div');
+      div.className = 'feed-item';
 
-      const res = await fetch(`/api/predictions/mine${qs}`, {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
+      // 🔹 BURASI YENİ: detayı açmak için ID'yi ekliyoruz
+      div.dataset.id = p.id;
+      div.style.cursor = 'pointer';
 
-      const data = await res.json();
+      const statusLabel =
+        p.status === 'correct'
+          ? 'Doğru'
+          : p.status === 'incorrect'
+          ? 'Yanlış'
+          : 'Bekliyor';
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Tahminler yüklenemedi.');
-      }
+      const headerTitle = p.isLocked
+        ? 'Mühürlü tahmin'
+        : p.title || '(Başlık yok)';
 
-      const items = data.data || [];
+      const contentHtml = p.isLocked
+        ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+        : p.content;
 
-      if (items.length === 0) {
-        myPredictionsListEl.innerHTML =
-          '<p class="small">Henüz tahmininiz yok (veya filtrelere uyan tahmin bulunamadı).</p>';
-        return;
-      }
+      div.innerHTML = `
+        <div class="feed-header">
+          <span class="feed-category">${p.category}</span>
+          <span class="feed-date">${p.targetDate || ''}</span>
+        </div>
+        <div class="feed-content">
+          <strong>${headerTitle}</strong>
+          <div>${contentHtml}</div>
+        </div>
+        <div class="feed-footer">
+          Durum: ${statusLabel}
+        </div>
+      `;
 
-      myPredictionsListEl.innerHTML = '';
-
-      items.forEach((p) => {
-        const div = document.createElement('div');
-        div.className = 'feed-item';
-
-        const statusLabel =
-          p.status === 'correct'
-            ? 'Doğru'
-            : p.status === 'incorrect'
-            ? 'Yanlış'
-            : 'Bekliyor';
-
-        const headerTitle = p.isLocked
-          ? 'Mühürlü tahmin'
-          : p.title || '(Başlık yok)';
-
-        const contentHtml = p.isLocked
-          ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-          : p.content;
-
-        div.innerHTML = `
-          <div class="feed-header">
-            <span class="feed-category">${p.category}</span>
-            <span class="feed-date">${p.targetDate || ''}</span>
-          </div>
-          <div class="feed-content">
-            <strong>${headerTitle}</strong>
-            <div>${contentHtml}</div>
-          </div>
-          <div class="feed-footer">
-            Durum: ${statusLabel}
-          </div>
-        `;
-
-        myPredictionsListEl.appendChild(div);
-      });
-    } catch (err) {
-      console.error(err);
-      myPredictionsListEl.innerHTML =
-        '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
-    }
+      myPredictionsListEl.appendChild(div);
+    });
+  } catch (err) {
+    console.error(err);
+    myPredictionsListEl.innerHTML =
+      '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
   }
+}
+
+async function loadPredictionDetail(predictionId) {
+  if (!authToken) {
+    predictionDetailEl.innerHTML =
+      '<p class="small">Detay görmek için önce giriş yapın.</p>';
+    return;
+  }
+
+  if (!predictionId) {
+    predictionDetailEl.innerHTML =
+      '<p class="small">Bir tahmine tıklayarak detayını burada görebilirsiniz.</p>';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/predictions/${predictionId}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Detay yüklenemedi.');
+    }
+
+    const statusLabel =
+      data.status === 'correct'
+        ? 'Doğru'
+        : data.status === 'incorrect'
+        ? 'Yanlış'
+        : 'Bekliyor';
+
+    const ownerName = data.user ? data.user.username : 'Bilinmiyor';
+
+    const title = data.isLocked
+      ? 'Mühürlü tahmin'
+      : data.title || '(Başlık yok)';
+
+    const contentHtml = data.isLocked
+      ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+      : data.content;
+
+    const createdStr = data.createdAt
+      ? new Date(data.createdAt).toISOString().split('T')[0]
+      : '';
+
+    predictionDetailEl.innerHTML = `
+      <div class="feed-item">
+        <div class="feed-header">
+          <span class="feed-user">${ownerName}</span>
+          <span class="feed-date">${data.targetDate || ''}</span>
+        </div>
+        <div class="feed-content">
+          <strong>${title}</strong>
+          <div>${contentHtml}</div>
+        </div>
+        <div class="feed-footer">
+          Kategori: ${data.category} · Durum: ${statusLabel}${
+      createdStr ? ` · Oluşturma: ${createdStr}` : ''
+    }
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.error(err);
+    predictionDetailEl.innerHTML =
+      '<p class="small">Detay yüklenirken bir hata oluştu.</p>';
+  }
+}
 
 
   async function loadFollowing() {

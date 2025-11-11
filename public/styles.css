@@ -218,3 +218,11 @@
   font-size: 12px;
   cursor: pointer;
 }
+
+#prediction-detail-section {
+  margin-top: 16px;
+}
+
+#prediction-detail {
+  margin-top: 8px;
+}
