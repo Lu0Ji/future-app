@@ -102,6 +102,8 @@
   const myPredictionsFilterCategoryEl = document.getElementById('my-predictions-filter-category');
   const myPredictionsFilterStatusEl = document.getElementById('my-predictions-filter-status');
   const myPredictionsClearFiltersBtn = document.getElementById('my-predictions-clear-filters');
+  const myStatsEl = document.getElementById('my-stats');
+
 
   // Detay paneli
   const predictionDetailEl = document.getElementById('prediction-detail');
@@ -332,6 +334,85 @@
       myPredictionsListEl.innerHTML = '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
     }
   }
+
+// Benim istatistiklerim kartı
+async function loadMyStats() {
+  if (!myStatsEl || !authToken) return;
+
+  try {
+    const data = await api.get('/api/stats/me', authToken);
+    const categories = data.categories || [];
+
+    if (!categories.length) {
+      myStatsEl.innerHTML = '<p class="small">Henüz istatistik yok. Tahmin yaptıkça burada belirecek.</p>';
+      return;
+    }
+
+    // Toplamlar
+    let total = 0;
+    let resolved = 0;
+    let correct = 0;
+    let incorrect = 0;
+
+    categories.forEach((c) => {
+      total += c.total || 0;
+      resolved += c.resolved || 0;
+      correct += c.correct || 0;
+      incorrect += c.incorrect || 0;
+    });
+
+    const accuracy = resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
+
+    // HTML tablo
+    let html = '';
+    html += `<div class="small" style="margin-bottom:8px;">
+      Kullanıcı: <strong>${escapeHtml(data.username || '')}</strong><br/>
+      Toplam tahmin: <strong>${total}</strong>,
+      Çözülen: <strong>${resolved}</strong>,
+      Doğru: <strong>${correct}</strong>,
+      Yanlış: <strong>${incorrect}</strong>,
+      Başarı: <strong>${accuracy}%</strong>
+    </div>`;
+
+    html += `<table class="small" style="width:100%; border-collapse:collapse; font-size:12px;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:4px 0;">Kategori</th>
+          <th style="text-align:right; padding:4px 0;">Toplam</th>
+          <th style="text-align:right; padding:4px 0;">Çözülen</th>
+          <th style="text-align:right; padding:4px 0;">Doğru</th>
+          <th style="text-align:right; padding:4px 0;">Yanlış</th>
+          <th style="text-align:right; padding:4px 0;">Başarı</th>
+        </tr>
+      </thead>
+      <tbody>
+    `;
+
+    categories.forEach((c) => {
+      html += `
+        <tr data-category-key="${escapeHtml(c.key || '')}" class="my-stats-row" style="cursor:pointer;">
+          <td style="padding:2px 0;">
+            <span style="text-decoration:underline;">${escapeHtml(c.label || c.key || '')}</span>
+          </td>
+          <td style="text-align:right;">${c.total || 0}</td>
+          <td style="text-align:right;">${c.resolved || 0}</td>
+          <td style="text-align:right;">${c.correct || 0}</td>
+          <td style="text-align:right;">${c.incorrect || 0}</td>
+          <td style="text-align:right;">${c.accuracy || 0}%</td>
+        </tr>
+      `;
+    });
+
+    html += '</tbody></table>';
+
+    myStatsEl.innerHTML = html;
+  } catch (err) {
+    console.error('loadMyStats error:', err);
+    myStatsEl.innerHTML =
+      '<p class="small">İstatistikler yüklenemedi.</p>';
+  }
+}
+
 
   async function loadPredictionDetail(predictionId) {
     if (!predictionDetailEl) return;
@@ -741,6 +822,30 @@ async function loadUserProfile(userId) {
     });
   }
 
+  // İstatistik satırına tıklayınca "Benim tahminlerim"i o kategoriye göre filtrele
+if (myStatsEl) {
+  myStatsEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.my-stats-row');
+    if (!row || !myPredictionsFilterCategoryEl) return;
+
+    const key = row.dataset.categoryKey || '';
+
+    // Filtre dropdown'unu ayarla
+    myPredictionsFilterCategoryEl.value = key || '';
+
+    // Statü filtresi neyse onu koruyarak tahminleri yeniden yükle
+    const status = myPredictionsFilterStatusEl
+      ? myPredictionsFilterStatusEl.value || ''
+      : '';
+
+    loadMyPredictions({
+      category: key || undefined,
+      status: status || undefined,
+    });
+  });
+}
+
+
   if (feedListEl) {
     feedListEl.addEventListener('click', (e) => {
     const u = e.target.closest('.user-link');
@@ -861,6 +966,7 @@ async function loadUserProfile(userId) {
     loadMyPredictions({}),
     loadFollowing(),
     loadExploreUsers(),
+    loadMyStats(),
   ]);
   }
   })();
