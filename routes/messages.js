@@ -11,6 +11,10 @@ router.post('/:recipientId', auth, async (req, res) => {
     const currentUserId = req.user.id;
     const { content } = req.body;
 
+    if (content.trim().length > 2000) {
+      return res.status(400).json({ error: 'Message too long (max 2000 chars).' });
+    }
+
     if (!content || !content.trim()) {
       return res
         .status(400)

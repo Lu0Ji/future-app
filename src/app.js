@@ -26,14 +26,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // API route'ları
-app.use('/api/auth', authRoutes);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/predictions', predictionRoutes);
-app.use('/api/stats', statsRoutes);
-app.use('/api/follow', followRoutes);
-app.use('/api/feed', feedRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/messages', messageRoutes);
+app.use('/api/auth', require('../routes/auth'));
+app.use('/api/predictions', require('../routes/predictions'));
+app.use('/api/categories', require('../routes/categories'));
+app.use('/api/stats', require('../routes/stats'));
+app.use('/api/follow', require('../routes/follow'));
+app.use('/api/feed', require('../routes/feed'));
+app.use('/api/messages', require('../routes/messages'));
+app.use('/api/users', require('../routes/users'));
+
 
 // Basit health check
 app.get('/api/health', (req, res) => {

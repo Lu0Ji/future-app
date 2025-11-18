@@ -96,11 +96,15 @@
 
         <section id="profile-section">
           <h2>Profil</h2>
+          <button id="profile-follow-btn" class="btn" style="margin-top:8px; display:none;">
+          Takip et
+          </button>
             <div id="profile-details">
               <p class="small">
                 Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.
               </p>
             </div>
+            <button id="profile-follow-btn" class="btn" style="margin-top:8px; display:none;">Takip et</button>
             <div id="profile-predictions">
               <p class="small">
                 Bu kullanıcının açılmış tahminleri burada görünecek.
@@ -171,19 +175,29 @@
         </section>
 
         <section id="prediction-detail-section">
-  <h2>Seçili tahmin detayı</h2>
-  <div id="prediction-detail">
-    <p class="small">
-      Bir tahmine tıklayarak detayını burada görebilirsiniz.
-    </p>
-  </div>
-</section>
+          <h2>Seçili tahmin detayı</h2>
+          <div id="prediction-detail">
+            <p class="small">
+              Bir tahmine tıklayarak detayını burada görebilirsiniz.
+            </p>
+          </div>
+        </section>
 
       </div>
 
 
-
     </main>
+    <!-- ============ TAKIP ETTIKLERIM ============ -->
+    <section class="card" id="following-card">
+      <h3>Takip ettiklerim</h3>
+      <div id="following-list" class="list"></div>
+    </section>
+
+    <section class="card">
+    <h3>Kullanıcılar</h3>
+    <div id="explore-users" class="list"></div>
+    </section>
+
   </div>
 
   <script src="app.js"></script>

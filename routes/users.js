@@ -1,136 +1,118 @@
+// routes/users.js
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
+
 const User = require('../models/User');
-const Follow = require('../models/Follow');
 const Prediction = require('../models/Prediction');
+const Follow = require('../models/Follow');
 
-// GET /api/users/me - mevcut kullanıcının özeti (şimdilik frontend kullanmasa da dursun)
-router.get('/me', auth, async (req, res) => {
+// GET /api/users/explore -> diğer kullanıcıları listele (keşfet)
+router.get('/explore', auth, async (req, res) => {
   try {
-    const userId = req.user.id;
-    const user = await User.findById(userId).select('_id username email createdAt');
+    const meId = req.user.id;
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    const [predictionCount, followerCount, followingCount] = await Promise.all([
-      Prediction.countDocuments({ user: userId }),
-      Follow.countDocuments({ following: userId }),
-      Follow.countDocuments({ follower: userId }),
-    ]);
-
-    return res.json({
-      id: user._id,
-      username: user.username,
-      email: user.email,
-      createdAt: user.createdAt,
-      predictionCount,
-      followerCount,
-      followingCount,
-      isMe: true,
-      isFollowing: false,
-    });
-  } catch (err) {
-    console.error('Get /users/me error:', err);
-    return res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// GET /api/users/:id/predictions -> profil için AÇILMIŞ tahminler
-router.get('/:id/predictions', auth, async (req, res) => {
-  try {
-    const userId = req.params.id;
-
-    const user = await User.findById(userId).select('_id username');
-    if (!user) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    const allPredictions = await Prediction.find({ user: userId })
-      .sort({ targetDate: -1, createdAt: -1 })
+    // Kendimiz hariç son kayıt olan kullanıcılar
+    const users = await User.find({ _id: { $ne: meId } })
+      .sort({ createdAt: -1 })
+      .limit(20)
       .lean();
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Takip ettiklerimizi bul
+    const follows = await Follow.find({ follower: meId })
+      .select('following')
+      .lean();
 
-    // Sadece hedef tarihi bugüne kadar gelmiş olanlar (mühür kalkmış olanlar)
-    const opened = allPredictions.filter((p) => {
-      if (!p.targetDate) return false;
-      const targetStr = p.targetDate.toISOString().split('T')[0];
-      return targetStr <= todayStr;
-    });
+    const followingSet = new Set(follows.map((f) => String(f.following)));
 
-    const data = opened.map((p) => ({
-      id: p._id,
-      title: p.title || null,
-      content: p.content,
-      category: p.category,
-      targetDate: p.targetDate
-        ? p.targetDate.toISOString().split('T')[0]
-        : null,
-      createdAt: p.createdAt
-        ? p.createdAt.toISOString().split('T')[0]
-        : null,
-      status: p.status || 'pending',
-      resolvedAt: p.resolvedAt || null,
+    const data = users.map((u) => ({
+      id: String(u._id),
+      username: u.username,
+      joinedAt: u.createdAt
+        ? u.createdAt.toISOString().split('T')[0]
+        : '',
+      isFollowing: followingSet.has(String(u._id)),
     }));
 
-
-    return res.json({
-      userId: user._id,
-      username: user.username,
-      count: data.length,
-      data,
-    });
+    res.json({ data });
   } catch (err) {
-    console.error('Get user predictions error:', err);
-    return res.status(500).json({ error: 'Internal server error.' });
+    console.error('users explore error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /api/users/:id -> profil özeti
+
+// GET /api/users/:id  -> Profil verisi + görülmesi serbest tahminler
 router.get('/:id', auth, async (req, res) => {
   try {
-    const targetId = req.params.id;
-    const currentUserId = req.user.id;
+    const { id } = req.params;
 
-    const user = await User.findById(targetId).select(
-      '_id username email createdAt'
-    );
+    const user = await User.findById(id).select('username email createdAt').lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found.' });
+    const isSelf = String(req.user.id) === String(user._id);
+
+    // Takip ediyor muyuz?
+    const isFollowing = await Follow.exists({
+      follower: req.user.id,
+      following: id,
+    });
+
+    // İstatistikler
+    const [total, correct, incorrect, resolved] = await Promise.all([
+      Prediction.countDocuments({ user: id }),
+      Prediction.countDocuments({ user: id, status: 'correct' }),
+      Prediction.countDocuments({ user: id, status: 'incorrect' }),
+      Prediction.countDocuments({ user: id, status: { $in: ['correct', 'incorrect'] } }),
+    ]);
+    const accuracy = resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
+
+    // Tahminler (kısıt)
+    // Başkalarının profiline bakıyorsak, sadece hedef tarihi gelmiş (açılmış) tahminleri göster.
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const query = { user: id };
+    if (!isSelf) {
+      query.targetDate = { $lte: new Date(`${todayStr}T23:59:59.999Z`) };
     }
 
-    const [predictionCount, followerCount, followingCount, followRelation] =
-      await Promise.all([
-        Prediction.countDocuments({ user: targetId }),
-        Follow.countDocuments({ following: targetId }),
-        Follow.countDocuments({ follower: targetId }),
-        Follow.findOne({
-          follower: currentUserId,
-          following: targetId,
-        }),
-      ]);
+    const preds = await Prediction.find(query)
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
 
-    const isMe = currentUserId === user._id.toString();
-    const isFollowing = !!followRelation;
+    const data = preds.map((p) => {
+      const targetStr = p.targetDate ? p.targetDate.toISOString().split('T')[0] : '';
+      const createdStr = p.createdAt ? p.createdAt.toISOString().split('T')[0] : '';
+      const isLocked = new Date(targetStr) > new Date(todayStr); // güvence
 
-    return res.json({
-      id: user._id,
-      username: user.username,
-      email: user.email,
-      createdAt: user.createdAt,
-      predictionCount,
-      followerCount,
-      followingCount,
-      isMe,
-      isFollowing,
+      return {
+        id: String(p._id),
+        category: p.category,
+        targetDate: targetStr,
+        createdAt: createdStr,
+        status: p.status || 'pending',
+        title: isSelf ? p.title || '' : isLocked ? '' : p.title || '',
+        // içerik: kendi profilinde her zaman bulunur (UI isterse gizler), başkasında sadece açılmışsa
+        content: isSelf ? p.content || '' : isLocked ? '' : p.content || '',
+        isLocked,
+      };
+    });
+
+    res.json({
+      user: {
+        id: String(user._id),
+        username: user.username,
+        joinedAt: user.createdAt?.toISOString().split('T')[0] || '',
+      },
+      isSelf,
+      isFollowing: !!isFollowing,
+      stats: { total, resolved, correct, incorrect, accuracy },
+      predictions: data,
     });
   } catch (err) {
-    console.error('Get user profile error:', err);
-    return res.status(500).json({ error: 'Internal server error.' });
+    console.error('User profile error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

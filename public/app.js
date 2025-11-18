@@ -1,966 +1,867 @@
-// Frontend: auth, tahmin, feed, benim tahminlerim, takip ettiklerim, profil ve DM
 
-let authToken = null;
-let currentUser = null;
-let currentDmUser = null; // seçili DM kullanıcısı
+(() => {
+  'use strict';
 
-document.addEventListener('DOMContentLoaded', () => {
-  const userInfoEl = document.getElementById('user-info');
-  const logoutBtn = document.getElementById('logout-btn');
+  // =========================
+  // 0) KÜÇÜK YARDIMCILAR
+  // =========================
 
+  const escapeHtml = (s) =>
+    String(s ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+
+  const fmtDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toISOString().split('T')[0];
+  };
+
+  // Basit fetch helper’ları:
+  const api = {
+    async get(url, token) {
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+      return data;
+    },
+    async post(url, body, token) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+      return data;
+    },
+    async patch(url, body, token) {
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+      return data;
+    },
+    async del(url, token) {
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+      return data;
+    },
+  };
+
+  // =========================
+  // 1) GLOBAL DURUM
+  // =========================
+
+  let authToken = localStorage.getItem('token') || '';
+  let currentUser = null; // {id, username} dolacak
+
+  // =========================
+  // 2) DOM ELEMANLARI (önce hepsini topla)
+  // =========================
+
+  // Auth
   const registerForm = document.getElementById('register-form');
   const loginForm = document.getElementById('login-form');
-  const authMessageEl = document.getElementById('auth-message');
+  const logoutButton = document.getElementById('logout-button');
+  const userInfoEl = document.getElementById('user-info');
 
+  // Tahmin oluşturma
   const predictionSection = document.getElementById('prediction-section');
   const predictionForm = document.getElementById('prediction-form');
-  const predictionContentEl = document.getElementById('prediction-content');
   const predictionTitleEl = document.getElementById('prediction-title');
-
-  const myPredictionsFilterCategoryEl = document.getElementById(
-    'my-predictions-filter-category'
-  );
-  const myPredictionsFilterStatusEl = document.getElementById(
-    'my-predictions-filter-status'
-  );
-  const myPredictionsClearFiltersBtn = document.getElementById(
-    'my-predictions-clear-filters'
-  );
-    if (myPredictionsFilterCategoryEl && myPredictionsFilterStatusEl) {
-    const triggerFilter = () => {
-      loadMyPredictions({
-        category: myPredictionsFilterCategoryEl.value || undefined,
-        status: myPredictionsFilterStatusEl.value || undefined,
-      });
-    };
-
-    myPredictionsFilterCategoryEl.addEventListener('change', triggerFilter);
-    myPredictionsFilterStatusEl.addEventListener('change', triggerFilter);
-
-    if (myPredictionsClearFiltersBtn) {
-      myPredictionsClearFiltersBtn.addEventListener('click', () => {
-        myPredictionsFilterCategoryEl.value = '';
-        myPredictionsFilterStatusEl.value = '';
-        loadMyPredictions(); // filtresiz
-      });
-    }
-  }
-    if (myPredictionsListEl) {
-    myPredictionsListEl.addEventListener('click', (e) => {
-      const item = e.target.closest('.feed-item');
-      if (!item) return;
-
-      const id = item.dataset.id;
-      if (!id) return;
-
-      loadPredictionDetail(id);
-    });
-}
-
-
+  const predictionContentEl = document.getElementById('prediction-content');
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
   const predictionMessageEl = document.getElementById('prediction-message');
+
+  // Feed
+  const feedListEl = document.getElementById('feed-list');
+
+  // Benim tahminlerim + filtreler
+  const myPredictionsListEl = document.getElementById('my-predictions-list');
+  const myPredictionsFilterCategoryEl = document.getElementById('my-predictions-filter-category');
+  const myPredictionsFilterStatusEl = document.getElementById('my-predictions-filter-status');
+  const myPredictionsClearFiltersBtn = document.getElementById('my-predictions-clear-filters');
+
+  // Detay paneli
   const predictionDetailEl = document.getElementById('prediction-detail');
 
-  
-
-  const feedListEl = document.getElementById('feed-list');
-  const myPredictionsListEl = document.getElementById('my-predictions-list');
-  const followingListEl = document.getElementById('following-list');
+  // Profil / DM (varsa çalışır)
   const profileDetailsEl = document.getElementById('profile-details');
   const profilePredictionsEl = document.getElementById('profile-predictions');
-
+  const followingListEl = document.getElementById('following-list');
+  const exploreUsersEl = document.getElementById('explore-users');
   const dmSelectedUserEl = document.getElementById('dm-selected-user');
   const dmMessagesEl = document.getElementById('dm-messages');
   const dmForm = document.getElementById('dm-form');
-  const dmInputEl = document.getElementById('dm-input');
-  const dmStatusEl = document.getElementById('dm-message-status');
-
-  // LocalStorage'dan auth bilgisi yükle
-  const stored = localStorage.getItem('auth');
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored);
-      authToken = parsed.token;
-      currentUser = parsed.user;
-    } catch (e) {
-      console.warn('Failed to parse stored auth:', e);
-      localStorage.removeItem('auth');
-    }
+  const dmMessageInputEl = document.getElementById('dm-message-input');
+  const profileFollowBtn = document.getElementById('profile-follow-btn');
+  if (profileFollowBtn) {
+  profileFollowBtn.style.display = 'none';
+  profileFollowBtn.dataset.userId = '';
+  profileFollowBtn.dataset.following = '';
   }
 
-  function setAuth(token, user) {
-    authToken = token || null;
-    currentUser = user || null;
-    currentDmUser = null;
 
-    if (token && user) {
-      localStorage.setItem('auth', JSON.stringify({ token, user }));
-    } else {
-      localStorage.removeItem('auth');
-    }
+  // =========================
+  // 3) UI GÜNCELLEME / YARDIMCILAR
+  // =========================
 
-    updateAuthUI();
+  function setToken(t) {
+    authToken = t || '';
+    if (authToken) localStorage.setItem('token', authToken);
+    else localStorage.removeItem('token');
   }
 
-  function updateAuthUI() {
-    if (!authToken || !currentUser) {
-      userInfoEl.textContent = 'Giriş yapmadınız';
-      logoutBtn.style.display = 'none';
-      loginForm.style.display = '';
-      registerForm.style.display = '';
-      predictionSection.classList.add('disabled');
-      predictionMessageEl.textContent =
-        'Tahmin göndermek için giriş yapmanız gerekiyor.';
-      predictionMessageEl.className = 'message error';
-
-      feedListEl.innerHTML =
-        '<p class="small">Feed için önce giriş yapın.</p>';
-      myPredictionsListEl.innerHTML =
-        '<p class="small">Tahminlerinizi görmek için önce giriş yapın.</p>';
-      followingListEl.innerHTML =
-        '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
-      profileDetailsEl.innerHTML =
-        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
-          if (predictionDetailEl) {
-      predictionDetailEl.innerHTML =
-      '<p class="small">Bir tahmine tıklayarak detayını burada görebilirsiniz.</p>';
-        }
-
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
-
-      dmSelectedUserEl.textContent =
-        'Henüz bir kullanıcı seçmediniz. Sağ taraftan "Takip ettiklerim" listesinden birini seçip mesajlaşabilirsiniz.';
-      dmMessagesEl.innerHTML = '<p class="small">Mesaj yok.</p>';
-      dmStatusEl.textContent = '';
-      dmStatusEl.className = 'message';
-    } else {
+  function setUserInfoText() {
+    if (!userInfoEl) return;
+    if (currentUser) {
       userInfoEl.textContent = `Merhaba, ${currentUser.username}`;
-      logoutBtn.style.display = 'inline-block';
-      loginForm.style.display = 'none';
-      registerForm.style.display = 'none';
-      predictionSection.classList.remove('disabled');
-      predictionMessageEl.textContent = '';
-      predictionMessageEl.className = 'message';
-
-      loadFeed();
-      loadMyPredictions();
-      loadFollowing();
-      loadUserProfile(currentUser.id);
-      dmSelectedUserEl.textContent =
-        'Mesajlaşmak için sağ taraftan bir kullanıcı seçin.';
-      dmMessagesEl.innerHTML =
-        '<p class="small">Bir kullanıcı seçilmedi.</p>';
+    } else {
+      userInfoEl.textContent = 'Giriş yapmadınız';
     }
   }
 
-    async function loadCategories() {
-  try {
-    const res = await fetch('/api/categories');
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Kategori yüklenemedi.');
-    }
-
-    // 🔹 Tahmin formundaki kategori select'i doldur
-    if (categorySelectEl) {
-      categorySelectEl.innerHTML = '';
-
-      data.data.forEach((cat) => {
-        const opt = document.createElement('option');
-        opt.value = cat.key;
-        opt.textContent = cat.label;
-        categorySelectEl.appendChild(opt);
-      });
-    }
-
-    // 🔹 "Benim tahminlerim" filtresi için kategori select'i doldur
-    if (myPredictionsFilterCategoryEl) {
-      myPredictionsFilterCategoryEl.innerHTML = '';
-
-      const allOpt = document.createElement('option');
-      allOpt.value = '';
-      allOpt.textContent = 'Tüm kategoriler';
-      myPredictionsFilterCategoryEl.appendChild(allOpt);
-
-      data.data.forEach((cat) => {
-        const opt = document.createElement('option');
-        opt.value = cat.key;
-        opt.textContent = cat.label;
-        myPredictionsFilterCategoryEl.appendChild(opt);
-      });
-    }
-  } catch (err) {
-    console.error('Kategori yükleme hatası:', err);
-
-    // Hata olursa en azından select boş kalmasın
-    if (categorySelectEl) {
-      categorySelectEl.innerHTML = '';
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'Yüklenemedi';
-      categorySelectEl.appendChild(opt);
+  function resetDetailPanel() {
+    if (predictionDetailEl) {
+      predictionDetailEl.innerHTML =
+        '<p class="small">Bir tahmine tıklayarak detayını burada görebilirsiniz.</p>';
     }
   }
-}
 
-
-
-  async function loadFeed() {
-    if (!authToken) {
-      feedListEl.innerHTML = '<p class="small">Feed için önce giriş yapın.</p>';
-      return;
-    }
-
+  async function loadMeLight() {
+    // Token varsa kullanıcı adını almak için hafif yol: /api/stats/me (projende var)
     try {
-      const res = await fetch('/api/feed', {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
+      const me = await api.get('/api/stats/me', authToken);
+      // beklenen: { userId, username, categories: [...] }
+      currentUser = { id: me.userId, username: me.username };
+    } catch {
+      currentUser = null;
+    }
+    setUserInfoText();
+  }
 
-      const data = await res.json();
+  // =========================
+  // 4) KATEGORİLER
+  // =========================
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Feed yüklenemedi.');
+  async function loadCategories() {
+    try {
+      const data = await api.get('/api/categories');
+      const categories = data.data || data || [];
+
+      // Tahmin formundaki select
+      if (categorySelectEl) {
+        categorySelectEl.innerHTML = '';
+        categories.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c.key;
+          opt.textContent = c.label;
+          categorySelectEl.appendChild(opt);
+        });
       }
 
-      const items = data.data || [];
-      if (items.length === 0) {
-        feedListEl.innerHTML =
-          '<p class="small">Takip ettiklerinden veya senden, tahmin bulunmuyor.</p>';
+      // Benim tahminlerim filtresi
+      if (myPredictionsFilterCategoryEl) {
+        myPredictionsFilterCategoryEl.innerHTML = '';
+        const all = document.createElement('option');
+        all.value = '';
+        all.textContent = 'Tüm kategoriler';
+        myPredictionsFilterCategoryEl.appendChild(all);
+
+        categories.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c.key;
+          opt.textContent = c.label;
+          myPredictionsFilterCategoryEl.appendChild(opt);
+        });
+      }
+    } catch (err) {
+      console.error('Kategori yükleme hatası:', err);
+      if (categorySelectEl) {
+        categorySelectEl.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Yüklenemedi';
+        categorySelectEl.appendChild(opt);
+      }
+    }
+  }
+  // =========================
+  // 4.5) TAKİP ETTİKLERİM
+  // =========================
+
+  
+
+  // =========================
+  // 5) FEED
+  // =========================
+
+  async function loadFeed() {
+    if (!feedListEl) return;
+    if (!authToken) {
+      feedListEl.innerHTML = '<p class="small">Henüz veri yok. Giriş yapıp tahmin oluşturduktan sonra burada görünecek.</p>';
+      return;
+    }
+    try {
+      const feed = await api.get('/api/feed', authToken);
+      const items = feed.data || feed || [];
+
+      if (!items.length) {
+        feedListEl.innerHTML = '<p class="small">Takip ettiklerinizden veya sizden henüz bir şey yok.</p>';
         return;
       }
 
       feedListEl.innerHTML = '';
-
       items.forEach((p) => {
         const div = document.createElement('div');
         div.className = 'feed-item';
 
-        const statusLabel = p.isLocked
-          ? 'Mühürlü'
-          : p.status === 'correct'
-          ? 'Doğru'
-          : p.status === 'incorrect'
-          ? 'Yanlış'
-          : 'Bekliyor';
+        const username = escapeHtml(p.username || 'unknown');
+        const cat = escapeHtml(p.category || '');
+        const tDate = fmtDate(p.targetDate);
+        const userId = escapeHtml(p.userId || '');
+        const title = p.isLocked ? 'Mühürlü tahmin' : escapeHtml(p.title || '(Başlık yok)');
+        const content = p.isLocked
+          ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+          : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
 
-        const contentText = p.isLocked
-          ? 'Bu kategoride mühürlü bir tahmin var. İçerik açılma tarihinde görünecek.'
-          : p.content;
-
-        div.innerHTML = `
+          div.innerHTML = `
           <div class="feed-header">
-            <span class="feed-user">${p.username}</span>
-            <span class="feed-category">${p.category}${
-          p.isLocked ? ' 🔒' : ''
-        }</span>
-            <span class="feed-date">${p.targetDate}</span>
+            <button class="user-link" data-user-id="${userId}"
+              style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0">
+              ${username}
+            </button>
+            <span class="feed-category">${cat}</span>
+            <span class="feed-date">${tDate}</span>
           </div>
-          <div class="feed-content">${contentText}</div>
-          <div class="feed-footer">Durum: ${statusLabel}</div>
-        `;
-
+          <div class="feed-content">
+            <strong>${title}</strong>
+            <div>${content}</div>
+          </div>
+          `;
+        ;
         feedListEl.appendChild(div);
       });
     } catch (err) {
-      console.error(err);
-      feedListEl.innerHTML =
-        '<p class="small">Feed yüklenirken bir hata oluştu.</p>';
+      console.error('Feed error:', err);
+      feedListEl.innerHTML = '<p class="small">Feed yüklenirken bir hata oluştu.</p>';
     }
   }
 
-async function loadMyPredictions(options = {}) {
-  if (!authToken) {
-    myPredictionsListEl.innerHTML =
-      '<p class="small">Tahminlerinizi görmek için giriş yapın.</p>';
-    return;
-  }
+  // =========================
+  // 6) BENİM TAHMİNLERİM + DETAY
+  // =========================
 
-  try {
-    const params = new URLSearchParams();
-    if (options.category) params.append('category', options.category);
-    if (options.status) params.append('status', options.status);
+  async function loadMyPredictions(options = {}) {
+    if (!myPredictionsListEl) return;
 
-    const qs = params.toString() ? `?${params.toString()}` : '';
-
-    const res = await fetch(`/api/predictions/mine${qs}`, {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Tahminler yüklenemedi.');
-    }
-
-    const items = data.data || [];
-
-    if (items.length === 0) {
-      myPredictionsListEl.innerHTML =
-        '<p class="small">Henüz tahmininiz yok (veya filtrelere uyan tahmin bulunamadı).</p>';
-      return;
-    }
-
-    myPredictionsListEl.innerHTML = '';
-
-    items.forEach((p) => {
-      const div = document.createElement('div');
-      div.className = 'feed-item';
-
-      // 🔹 BURASI YENİ: detayı açmak için ID'yi ekliyoruz
-      div.dataset.id = p.id;
-      div.style.cursor = 'pointer';
-
-      const statusLabel =
-        p.status === 'correct'
-          ? 'Doğru'
-          : p.status === 'incorrect'
-          ? 'Yanlış'
-          : 'Bekliyor';
-
-      const headerTitle = p.isLocked
-        ? 'Mühürlü tahmin'
-        : p.title || '(Başlık yok)';
-
-      const contentHtml = p.isLocked
-        ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-        : p.content;
-
-      div.innerHTML = `
-        <div class="feed-header">
-          <span class="feed-category">${p.category}</span>
-          <span class="feed-date">${p.targetDate || ''}</span>
-        </div>
-        <div class="feed-content">
-          <strong>${headerTitle}</strong>
-          <div>${contentHtml}</div>
-        </div>
-        <div class="feed-footer">
-          Durum: ${statusLabel}
-        </div>
-      `;
-
-      myPredictionsListEl.appendChild(div);
-    });
-  } catch (err) {
-    console.error(err);
-    myPredictionsListEl.innerHTML =
-      '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
-  }
-}
-
-async function loadPredictionDetail(predictionId) {
-  if (!authToken) {
-    predictionDetailEl.innerHTML =
-      '<p class="small">Detay görmek için önce giriş yapın.</p>';
-    return;
-  }
-
-  if (!predictionId) {
-    predictionDetailEl.innerHTML =
-      '<p class="small">Bir tahmine tıklayarak detayını burada görebilirsiniz.</p>';
-    return;
-  }
-
-  try {
-    const res = await fetch(`/api/predictions/${predictionId}`, {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Detay yüklenemedi.');
-    }
-
-    const statusLabel =
-      data.status === 'correct'
-        ? 'Doğru'
-        : data.status === 'incorrect'
-        ? 'Yanlış'
-        : 'Bekliyor';
-
-    const ownerName = data.user ? data.user.username : 'Bilinmiyor';
-
-    const title = data.isLocked
-      ? 'Mühürlü tahmin'
-      : data.title || '(Başlık yok)';
-
-    const contentHtml = data.isLocked
-      ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-      : data.content;
-
-    const createdStr = data.createdAt
-      ? new Date(data.createdAt).toISOString().split('T')[0]
-      : '';
-
-    predictionDetailEl.innerHTML = `
-      <div class="feed-item">
-        <div class="feed-header">
-          <span class="feed-user">${ownerName}</span>
-          <span class="feed-date">${data.targetDate || ''}</span>
-        </div>
-        <div class="feed-content">
-          <strong>${title}</strong>
-          <div>${contentHtml}</div>
-        </div>
-        <div class="feed-footer">
-          Kategori: ${data.category} · Durum: ${statusLabel}${
-      createdStr ? ` · Oluşturma: ${createdStr}` : ''
-    }
-        </div>
-      </div>
-    `;
-  } catch (err) {
-    console.error(err);
-    predictionDetailEl.innerHTML =
-      '<p class="small">Detay yüklenirken bir hata oluştu.</p>';
-  }
-}
-
-
-  async function loadFollowing() {
     if (!authToken) {
-      followingListEl.innerHTML =
-        '<p class="small">Takip ettiklerinizi görmek için önce giriş yapın.</p>';
+      myPredictionsListEl.innerHTML = '<p class="small">Tahminlerinizi görmek için giriş yapın.</p>';
       return;
     }
 
     try {
-      const res = await fetch('/api/follow/following', {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
+      const params = new URLSearchParams();
+      if (options.category) params.append('category', options.category);
+      if (options.status) params.append('status', options.status);
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Takip ettikleriniz yüklenemedi.');
-      }
-
-      const items = data.following || [];
-      if (items.length === 0) {
-        followingListEl.innerHTML =
-          '<p class="small">Henüz kimseyi takip etmiyorsunuz.</p>';
-        return;
-      }
-
-      followingListEl.innerHTML = '';
-
-      items.forEach((u) => {
-        const div = document.createElement('div');
-        div.className = 'feed-item';
-
-        const profileBtn = document.createElement('button');
-        profileBtn.type = 'button';
-        profileBtn.textContent = 'Profili gör';
-        profileBtn.style.marginTop = '6px';
-        profileBtn.addEventListener('click', () => {
-          loadUserProfile(u.id);
-        });
-
-        const dmBtn = document.createElement('button');
-        dmBtn.type = 'button';
-        dmBtn.textContent = 'Mesajlaş';
-        dmBtn.style.marginTop = '6px';
-        dmBtn.style.marginLeft = '6px';
-        dmBtn.addEventListener('click', () => {
-          startConversation(u);
-        });
-
-        div.innerHTML = `
-          <div class="feed-header">
-            <span class="feed-user">${u.username}</span>
-            <span class="feed-date small">Takip edildi: ${
-              new Date(u.followedAt).toISOString().split('T')[0]
-            }</span>
-          </div>
-          <div class="feed-content small">${u.email || ''}</div>
-        `;
-
-        const btnWrapper = document.createElement('div');
-        btnWrapper.style.marginTop = '4px';
-        btnWrapper.appendChild(profileBtn);
-        btnWrapper.appendChild(dmBtn);
-
-        div.appendChild(btnWrapper);
-        followingListEl.appendChild(div);
-      });
-    } catch (err) {
-      console.error(err);
-      followingListEl.innerHTML =
-        '<p class="small">Takip ettikleriniz yüklenirken bir hata oluştu.</p>';
-    }
-  }
-
-    async function loadUserProfile(userId) {
-    if (!authToken) {
-      profileDetailsEl.innerHTML =
-        '<p class="small">Profil görmek için önce giriş yapın.</p>';
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Profil tahminlerini görmek için önce giriş yapın.</p>';
-      return;
-    }
-
-    if (!userId) {
-      profileDetailsEl.innerHTML =
-        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/users/${userId}`, {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Profil yüklenemedi.');
-      }
-
-      const createdStr = new Date(data.createdAt)
-        .toISOString()
-        .split('T')[0];
-
-      profileDetailsEl.innerHTML = `
-        <div class="feed-item">
-          <div class="feed-header">
-            <span class="feed-user">${data.username}</span>
-            <span class="feed-date">Katılım: ${createdStr}</span>
-          </div>
-          <div class="feed-content">
-            <div class="small">${data.email || ''}</div>
-            <div class="small">
-              Tahmin sayısı: <strong>${data.predictionCount}</strong><br/>
-              Takipçi: <strong>${data.followerCount}</strong> · Takip ettikleri: <strong>${data.followingCount}</strong>
-            </div>
-          </div>
-          <div class="feed-footer">
-            ${
-              data.isMe
-                ? 'Bu sizsiniz.'
-                : data.isFollowing
-                ? 'Takip ediyorsunuz.'
-                : 'Takip etmiyorsunuz.'
-            }
-          </div>
-        </div>
-      `;
-
-      // ✅ Profil yüklendikten sonra, aynı kullanıcı için açılmış tahminleri getir
-      loadProfilePredictions(userId);
-    } catch (err) {
-      console.error(err);
-      profileDetailsEl.innerHTML =
-        '<p class="small">Profil yüklenirken bir hata oluştu.</p>';
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Profil tahminleri yüklenirken bir hata oluştu.</p>';
-    }
-  }
-
-    async function loadProfilePredictions(userId) {
-    if (!authToken) {
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Profil tahminlerini görmek için önce giriş yapın.</p>';
-      return;
-    }
-
-    if (!userId) {
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.</p>';
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/users/${userId}/predictions`, {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(
-          data.error || 'Profil tahminleri yüklenemedi.'
-        );
-      }
-
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const data = await api.get(`/api/predictions/mine${qs}`, authToken);
       const items = data.data || [];
 
-      if (items.length === 0) {
-        profilePredictionsEl.innerHTML =
-          '<p class="small">Bu kullanıcının açılmış tahmini yok.</p>';
+      if (!items.length) {
+        myPredictionsListEl.innerHTML =
+          '<p class="small">Henüz tahmininiz yok (veya filtrelere uyan tahmin bulunamadı).</p>';
         return;
       }
 
-      profilePredictionsEl.innerHTML = '';
-
+      myPredictionsListEl.innerHTML = '';
       items.forEach((p) => {
         const div = document.createElement('div');
         div.className = 'feed-item';
+        div.dataset.id = p.id;
+        div.style.cursor = 'pointer';
 
         const statusLabel =
-          p.status === 'correct'
-            ? 'Doğru'
-            : p.status === 'incorrect'
-            ? 'Yanlış'
-            : 'Bekliyor';
+          p.status === 'correct' ? 'Doğru' :
+          p.status === 'incorrect' ? 'Yanlış' : 'Bekliyor';
 
-        const createdStr = p.createdAt || '';
+        const headerTitle = p.isLocked ? 'Mühürlü tahmin' : escapeHtml(p.title || '(Başlık yok)');
+        const contentHtml = p.isLocked
+          ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+          : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
 
         div.innerHTML = `
           <div class="feed-header">
-            <span class="feed-category">${p.category}</span>
-            <span class="feed-date">${p.targetDate}</span>
+            <span class="feed-category">${escapeHtml(p.category || '')}</span>
+            <span class="feed-date">${fmtDate(p.targetDate)}</span>
           </div>
-          <div class="feed-content">${p.content}</div>
+          <div class="feed-content">
+            <strong>${headerTitle}</strong>
+            <div>${contentHtml}</div>
+          </div>
           <div class="feed-footer">
-            Durum: ${statusLabel}${
-          createdStr ? ` · Oluşturma: ${createdStr}` : ''
-        }
+            Durum: ${statusLabel}
           </div>
         `;
-
-        profilePredictionsEl.appendChild(div);
+        myPredictionsListEl.appendChild(div);
       });
     } catch (err) {
-      console.error(err);
-      profilePredictionsEl.innerHTML =
-        '<p class="small">Profil tahminleri yüklenirken bir hata oluştu.</p>';
+      console.error('My predictions error:', err);
+      myPredictionsListEl.innerHTML = '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
     }
   }
 
+  async function loadPredictionDetail(predictionId) {
+    if (!predictionDetailEl) return;
 
-  // DM başlat
-  function startConversation(user) {
-    currentDmUser = user;
-    dmStatusEl.textContent = '';
-    dmStatusEl.className = 'message';
-
-    dmSelectedUserEl.textContent = `${user.username} ile mesajlaşma`;
-    loadConversation(user.id);
-  }
-
-  // DM konuşmasını yükle
-  async function loadConversation(userId) {
     if (!authToken) {
-      dmMessagesEl.innerHTML =
-        '<p class="small">Mesajlaşmak için önce giriş yapın.</p>';
+      resetDetailPanel();
+      return;
+    }
+    if (!predictionId) {
+      resetDetailPanel();
       return;
     }
 
     try {
-      const res = await fetch(`/api/messages/conversation/${userId}`, {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
+      const data = await api.get(`/api/predictions/${predictionId}`, authToken);
 
-      const data = await res.json();
+      const statusLabel =
+        data.status === 'correct' ? 'Doğru' :
+        data.status === 'incorrect' ? 'Yanlış' : 'Bekliyor';
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Mesajlar yüklenemedi.');
-      }
+      const ownerName = escapeHtml(data.user?.username || 'Bilinmiyor');
+      const cat = escapeHtml(data.category || '');
+      const tDate = fmtDate(data.targetDate);
+      const created = fmtDate(data.createdAt);
 
-      const messages = data.messages || [];
-      if (messages.length === 0) {
-        dmMessagesEl.innerHTML =
-          '<p class="small">Henüz mesaj yok. İlk mesajı siz gönderebilirsiniz.</p>';
-        return;
-      }
+      const title = data.isLocked ? 'Mühürlü tahmin' : escapeHtml(data.title || '(Başlık yok)');
+      const contentHtml = data.isLocked
+        ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+        : escapeHtml(data.content || '').replace(/\n/g, '<br/>');
 
-      dmMessagesEl.innerHTML = '';
-      messages.forEach((m) => {
-        const div = document.createElement('div');
-        div.className = 'dm-message' + (m.fromSelf ? ' self' : '');
-
-        const timeStr = new Date(m.createdAt)
-          .toISOString()
-          .split('T')[1]
-          .slice(0, 5);
-
-        div.innerHTML = `
-          <div class="dm-message-meta">
-            ${m.fromSelf ? 'Siz' : currentDmUser?.username || 'Karşı taraf'} · ${timeStr}
+      predictionDetailEl.innerHTML = `
+        <div class="feed-item">
+          <div class="feed-header">
+            <span class="feed-user">${ownerName}</span>
+            <span class="feed-category">${cat}</span>
+            <span class="feed-date">${tDate}</span>
           </div>
-          <div class="dm-message-content">${m.content}</div>
-        `;
-
-        dmMessagesEl.appendChild(div);
-      });
-
-      // Listeyi en alta kaydır
-      dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+          <div class="feed-content">
+            <strong>${title}</strong>
+            <div>${contentHtml}</div>
+          </div>
+          <div class="feed-footer">
+            Durum: ${statusLabel} ${created ? `· Oluşturma: ${created}` : ''}
+          </div>
+        </div>
+      `;
     } catch (err) {
-      console.error(err);
-      dmMessagesEl.innerHTML =
-        '<p class="small">Mesajlar yüklenirken bir hata oluştu.</p>';
+      console.error('Prediction detail error:', err);
+      predictionDetailEl.innerHTML = '<p class="small">Detay yüklenirken bir hata oluştu.</p>';
     }
   }
+  // Takip ettiklerim listesini yükler
+  async function loadFollowing() {
+  if (!followingListEl || !authToken) return;
+  try {
+    const data = await api.get('/api/follow/following', authToken);
+    const items = data.data || [];
+    if (!items.length) {
+      followingListEl.innerHTML = '<p class="small">Henüz kimseyi takip etmiyorsunuz.</p>';
+      return;
+    }
+    followingListEl.innerHTML = '';
+    items.forEach((u) => {
+      const li = document.createElement('div');
+      li.className = 'feed-item';
+      li.innerHTML = `
+        <div class="feed-header">
+          <button class="user-link" data-user-id="${escapeHtml(u.id)}"
+            style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0">
+            ${escapeHtml(u.username)}
+          </button>
+          <span class="feed-date">${escapeHtml(u.joinedAt || '')}</span>
+        </div>
+        <div class="small">Takip ediliyor</div>
+      `;
+      followingListEl.appendChild(li);
+    });
+  } catch (err) {
+    console.error('loadFollowing error:', err);
+    followingListEl.innerHTML = '<p class="small">Takip listesi yüklenemedi.</p>';
+  }
+}
 
-  // DM formu gönderme
-  dmForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    dmStatusEl.textContent = '';
-    dmStatusEl.className = 'message';
+// Kullanıcı keşfet listesi
+async function loadExploreUsers() {
+  if (!exploreUsersEl || !authToken) return;
 
-    if (!authToken) {
-      dmStatusEl.textContent = 'Mesaj göndermek için önce giriş yapın.';
-      dmStatusEl.className = 'message error';
+  try {
+    const data = await api.get('/api/users/explore', authToken);
+    const items = data.data || [];
+
+    if (!items.length) {
+      exploreUsersEl.innerHTML =
+        '<p class="small">Görüntülenecek kullanıcı bulunamadı.</p>';
       return;
     }
 
-    if (!currentDmUser) {
-      dmStatusEl.textContent =
-        'Önce sağ taraftan bir kullanıcı seçin.';
-      dmStatusEl.className = 'message error';
-      return;
+    exploreUsersEl.innerHTML = '';
+    items.forEach((u) => {
+      const div = document.createElement('div');
+      div.className = 'feed-item';
+
+      const followLabel = u.isFollowing ? 'Takibi bırak' : 'Takip et';
+      const followingAttr = u.isFollowing ? 'true' : 'false';
+
+      div.innerHTML = `
+        <div class="feed-header">
+          <button class="user-link" data-user-id="${escapeHtml(u.id)}"
+            style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0">
+            ${escapeHtml(u.username)}
+          </button>
+          <button
+            class="btn btn-small explore-follow-btn"
+            data-user-id="${escapeHtml(u.id)}"
+            data-following="${followingAttr}"
+            style="margin-left:auto"
+          >
+            ${followLabel}
+          </button>
+        </div>
+        <div class="small">Katılım: ${escapeHtml(u.joinedAt || '')}</div>
+      `;
+
+      exploreUsersEl.appendChild(div);
+    });
+  } catch (err) {
+    console.error('loadExploreUsers error:', err);
+    exploreUsersEl.innerHTML =
+      '<p class="small">Kullanıcı listesi yüklenemedi.</p>';
+  }
+}
+
+// Belirli kullanıcının profilini ve tahminlerini yükler
+async function loadUserProfile(userId) {
+  if (!authToken) return;
+  try {
+    const prof = await api.get(`/api/users/${encodeURIComponent(userId)}`, authToken);
+
+    const u = prof.user;
+    const stats = prof.stats || {};
+    const items = prof.predictions || [];
+
+    // Profil üst bilgileri
+    if (profileDetailsEl) {
+      profileDetailsEl.innerHTML = `
+        <div><strong>${escapeHtml(u.username)}</strong></div>
+        <div class="small">Katılım: ${escapeHtml(u.joinedAt || '')}</div>
+        <div class="small">
+          Toplam: ${stats.total || 0}
+          · Çözülen: ${stats.resolved || 0}
+          · Doğru: ${stats.correct || 0}
+          · Yanlış: ${stats.incorrect || 0}
+          · Başarı: ${stats.accuracy || 0}%
+        </div>
+      `;
     }
 
-    const content = dmInputEl.value.trim();
-    if (!content) {
-      dmStatusEl.textContent = 'Boş mesaj gönderemezsiniz.';
-      dmStatusEl.className = 'message error';
-      return;
+    // Takip et / bırak butonu
+    if (profileFollowBtn) {
+      profileFollowBtn.dataset.userId = u.id;
+      // backend'den isSelf ve isFollowing geliyor
+      if (prof.isSelf) {
+        // Kendi profilimiz -> buton gizli
+        profileFollowBtn.style.display = 'none';
+        profileFollowBtn.dataset.following = '';
+      } else {
+        profileFollowBtn.style.display = 'inline-block';
+        profileFollowBtn.dataset.following = prof.isFollowing ? 'true' : 'false';
+        profileFollowBtn.textContent = prof.isFollowing ? 'Takibi bırak' : 'Takip et';
+      }
     }
 
-    try {
-      const res = await fetch(
-        `/api/messages/${currentDmUser.id}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: JSON.stringify({ content }),
-        }
-      );
+    // Tahmin listesi
+    if (profilePredictionsEl) {
+      if (!items.length) {
+        profilePredictionsEl.innerHTML =
+          '<p class="small">Bu kullanıcının görünür tahmini yok.</p>';
+      } else {
+        profilePredictionsEl.innerHTML = '';
+        items.forEach((p) => {
+          const div = document.createElement('div');
+          div.className = 'feed-item';
+          const title = p.isLocked
+            ? 'Mühürlü tahmin'
+            : escapeHtml(p.title || '(Başlık yok)');
+          const content = p.isLocked
+            ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+            : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
+          const status =
+            p.status === 'correct'
+              ? 'Doğru'
+              : p.status === 'incorrect'
+              ? 'Yanlış'
+              : 'Bekliyor';
 
-      const data = await res.json();
+          div.innerHTML = `
+            <div class="feed-header">
+              <span class="feed-category">${escapeHtml(p.category || '')}</span>
+              <span class="feed-date">${escapeHtml(p.targetDate || '')}</span>
+            </div>
+            <div class="feed-content">
+              <strong>${title}</strong>
+              <div>${content}</div>
+            </div>
+            <div class="feed-footer">Durum: ${status}</div>
+          `;
+          profilePredictionsEl.appendChild(div);
+        });
+      }
+    }
+  } catch (err) {
+    console.error('loadUserProfile error:', err);
+    if (profileDetailsEl) {
+      profileDetailsEl.innerHTML =
+        '<p class="small">Profil yüklenemedi.</p>';
+    }
+    if (profilePredictionsEl) {
+      profilePredictionsEl.innerHTML = '';
+    }
+  }
+}
 
-      if (!res.ok) {
-        dmStatusEl.textContent =
-          data.error || 'Mesaj gönderilemedi.';
-        dmStatusEl.className = 'message error';
+
+
+
+  // =========================
+  // 7) AUTH (register / login / logout)
+  // =========================
+
+  if (registerForm) {
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      // formdan mümkün olduğunca esnek oku:
+      const inputs = registerForm.querySelectorAll('input');
+      // beklenen sırayla: username, email, password
+      const username = inputs[0]?.value?.trim();
+      const email = inputs[1]?.value?.trim();
+      const password = inputs[2]?.value || '';
+
+      if (!username || !email || !password) {
+        alert('Kullanıcı adı, e-posta ve şifre gerekli.');
+        return;
+      }
+      try {
+        await api.post('/api/auth/register', { username, email, password });
+        alert('Kayıt başarılı. Şimdi giriş yapabilirsiniz.');
+        registerForm.reset();
+      } catch (err) {
+        alert(err.message || 'Kayıt başarısız.');
+      }
+    });
+  }
+
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inputs = loginForm.querySelectorAll('input');
+      // beklenen: [identifier(text), password(password)]
+      const identifier = inputs[0]?.value?.trim();
+      const password = inputs[inputs.length - 1]?.value || '';
+
+      if (!identifier || !password) {
+        alert('Kullanıcı adı/e-posta ve şifre gerekli.');
         return;
       }
 
-      dmInputEl.value = '';
-      dmStatusEl.textContent = 'Mesaj gönderildi.';
-      dmStatusEl.className = 'message success';
-
-      // Konuşmayı yeniden yükle
-      loadConversation(currentDmUser.id);
-    } catch (err) {
-      console.error(err);
-      dmStatusEl.textContent =
-        'Mesaj gönderilirken bir hata oluştu.';
-      dmStatusEl.className = 'message error';
-    }
-  });
-
-  // Kayıt formu
-  registerForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    authMessageEl.textContent = '';
-    authMessageEl.className = 'message';
-
-    const username = document.getElementById('register-username').value.trim();
-    const email = document.getElementById('register-email').value.trim();
-    const password = document
-      .getElementById('register-password')
-      .value.trim();
-
-    if (!username || !email || !password) {
-      authMessageEl.textContent = 'Lütfen tüm kayıt alanlarını doldurun.';
-      authMessageEl.className = 'message error';
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, email, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        authMessageEl.textContent = data.error || 'Kayıt başarısız.';
-        authMessageEl.className = 'message error';
-        return;
-      }
-
-      authMessageEl.textContent =
-        'Kayıt başarılı. Şimdi sağ taraftan giriş yapabilirsiniz.';
-      authMessageEl.className = 'message success';
-      registerForm.reset();
-    } catch (err) {
-      console.error(err);
-      authMessageEl.textContent = 'Kayıt sırasında bir hata oluştu.';
-      authMessageEl.className = 'message error';
-    }
-  });
-
-  // Giriş formu
-  loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    authMessageEl.textContent = '';
-    authMessageEl.className = 'message';
-
-    const identifier = document
-      .getElementById('login-identifier')
-      .value.trim();
-    const password = document
-      .getElementById('login-password')
-      .value.trim();
-
-    if (!identifier || !password) {
-      authMessageEl.textContent = 'Lütfen giriş bilgilerini doldurun.';
-      authMessageEl.className = 'message error';
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      try {
+        const data = await api.post('/api/auth/login', {
           emailOrUsername: identifier,
           password,
-        }),
-      });
+        });
+        // beklenen: { token, user: { id, username } }
+        setToken(data.token);
+        currentUser = data.user || null;
+        setUserInfoText();
+        resetDetailPanel();
 
-      const data = await res.json();
+        // başarılı login -> verileri yükle
+        await Promise.all([loadFeed(), loadMyPredictions({})]);
+        alert('Giriş başarılı.');
+      } catch (err) {
+        alert(err.message || 'Giriş başarısız.');
+      }
+    });
+  }
 
-      if (!res.ok) {
-        authMessageEl.textContent = data.error || 'Giriş başarısız.';
-        authMessageEl.className = 'message error';
+  if (logoutButton) {
+    logoutButton.addEventListener('click', () => {
+      setToken('');
+      currentUser = null;
+      setUserInfoText();
+      resetDetailPanel();
+      // ekranları temizle
+      if (feedListEl) feedListEl.innerHTML = '';
+      if (myPredictionsListEl) myPredictionsListEl.innerHTML = '';
+      alert('Çıkış yapıldı.');
+    });
+  }
+
+  // =========================
+  // 8) TAHMİN OLUŞTURMA
+  // =========================
+
+  if (predictionForm) {
+    predictionForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!authToken) {
+        if (predictionMessageEl) {
+          predictionMessageEl.textContent = 'Tahmin göndermek için önce giriş yapın.';
+          predictionMessageEl.className = 'message error';
+        }
         return;
       }
 
-      setAuth(data.token, data.user);
-      authMessageEl.textContent = 'Giriş başarılı.';
-      authMessageEl.className = 'message success';
-      loginForm.reset();
+      const title = predictionTitleEl?.value?.trim() || '';
+      const content = predictionContentEl?.value?.trim() || '';
+      const targetDate = predictionDateEl?.value || '';
+      const category = categorySelectEl?.value || '';
+
+      if (!title || !content || !targetDate || !category) {
+        if (predictionMessageEl) {
+          predictionMessageEl.textContent = 'Lütfen başlık, tahmin, tarih ve kategoriyi doldurun.';
+          predictionMessageEl.className = 'message error';
+        }
+        return;
+      }
+
+      try {
+        await api.post('/api/predictions', { title, content, targetDate, category }, authToken);
+        if (predictionMessageEl) {
+          predictionMessageEl.textContent = 'Tahmin başarıyla mühürlendi.';
+          predictionMessageEl.className = 'message success';
+        }
+        predictionForm.reset();
+        // liste/ feed güncelle
+        await Promise.all([loadFeed(), loadMyPredictions({})]);
+      } catch (err) {
+        if (predictionMessageEl) {
+          predictionMessageEl.textContent = err.message || 'Tahmin oluşturulamadı.';
+          predictionMessageEl.className = 'message error';
+        }
+      }
+    });
+  }
+
+  // =========================
+  // 9) BENİM TAHMİNLERİM FİLTRELERİ
+  // =========================
+
+  if (myPredictionsFilterCategoryEl) {
+    myPredictionsFilterCategoryEl.addEventListener('change', () => {
+      const category = myPredictionsFilterCategoryEl.value || undefined;
+      const status = myPredictionsFilterStatusEl ? myPredictionsFilterStatusEl.value || undefined : undefined;
+      loadMyPredictions({ category, status });
+    });
+  }
+
+  if (myPredictionsFilterStatusEl) {
+    myPredictionsFilterStatusEl.addEventListener('change', () => {
+      const category = myPredictionsFilterCategoryEl ? myPredictionsFilterCategoryEl.value || undefined : undefined;
+      const status = myPredictionsFilterStatusEl.value || undefined;
+      loadMyPredictions({ category, status });
+    });
+  }
+
+  if (myPredictionsClearFiltersBtn) {
+    myPredictionsClearFiltersBtn.addEventListener('click', () => {
+      if (myPredictionsFilterCategoryEl) myPredictionsFilterCategoryEl.value = '';
+      if (myPredictionsFilterStatusEl) myPredictionsFilterStatusEl.value = '';
+      loadMyPredictions({});
+    });
+  }
+
+  if (myPredictionsListEl) {
+    myPredictionsListEl.addEventListener('click', (e) => {
+      const item = e.target.closest('.feed-item');
+      if (!item) return;
+      const id = item.dataset.id;
+      if (!id) return;
+      loadPredictionDetail(id);
+    });if (profileFollowBtn) {
+    profileFollowBtn.addEventListener('click', async () => {
+    if (!authToken) return;
+    const uid = profileFollowBtn.dataset.userId;
+    if (!uid) return;
+
+    try {
+      if (profileFollowBtn.textContent.includes('bırak')) {
+        await api.del(`/api/follow/${encodeURIComponent(uid)}`, authToken);
+      } else {
+        await api.post(`/api/follow/${encodeURIComponent(uid)}`, {}, authToken);
+      }
+      await Promise.all([loadUserProfile(uid), loadFollowing()]);
     } catch (err) {
-      console.error(err);
-      authMessageEl.textContent = 'Giriş sırasında bir hata oluştu.';
-      authMessageEl.className = 'message error';
+      alert(err.message || 'İşlem başarısız.');
     }
   });
-
-  // Çıkış
-  logoutBtn.addEventListener('click', () => {
-    setAuth(null, null);
-    authMessageEl.textContent = 'Çıkış yapıldı.';
-    authMessageEl.className = 'message';
-  });
-
-// Tahmin formu
-predictionForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  predictionMessageEl.textContent = '';
-  predictionMessageEl.className = 'message';
-
-  // 🔐 Giriş kontrolü
-  if (!authToken) {
-    predictionMessageEl.textContent =
-      'Tahmin göndermek için önce giriş yapın.';
-    predictionMessageEl.className = 'message error';
-    return;
   }
 
-  // 🆕 Başlık + içerik + tarih + kategori
-  const title = predictionTitleEl.value.trim();          // <--- yeni satır
-  const content = predictionContentEl.value.trim();
-  const targetDate = predictionDateEl.value;
-  const category = categorySelectEl.value;
-
-  // 🧪 Validasyon
-  if (!title) {
-    predictionMessageEl.textContent = 'Lütfen bir başlık girin.';
-    predictionMessageEl.className = 'message error';
-    return;
-  }
-
-  if (!content || !targetDate || !category) {
-    predictionMessageEl.textContent =
-      'Lütfen tahmin, tarih ve kategoriyi doldurun.';
-    predictionMessageEl.className = 'message error';
-    return;
-  }
-
-  // 📤 API isteği
-  try {
-    const res = await fetch('/api/predictions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({ title, content, targetDate, category }), // <-- title da gidiyor
+  if (followingListEl) {
+    followingListEl.addEventListener('click', (e) => {
+      const u = e.target.closest('.user-link');
+      if (!u) return;
+      const uid = u.dataset.userId;
+      if (!uid) return;
+      loadUserProfile(uid);
     });
+  }
 
-    const data = await res.json();
+  if (feedListEl) {
+    feedListEl.addEventListener('click', (e) => {
+    const u = e.target.closest('.user-link');
+    if (!u) return;
+    const uid = u.dataset.userId;
+    if (!uid) return; // backend'den henüz userId gelmiyorsa sessizce çık
+    loadUserProfile(uid);
+  });
+  }
+  if (profileFollowBtn) {
+  profileFollowBtn.addEventListener('click', async () => {
+    if (!authToken) return;
 
-    if (!res.ok) {
-      predictionMessageEl.textContent =
-        data.error || 'Tahmin oluşturulamadı.';
-      predictionMessageEl.className = 'message error';
+    const userId = profileFollowBtn.dataset.userId;
+    const isFollowing = profileFollowBtn.dataset.following === 'true';
+    if (!userId) return;
+
+    try {
+      if (isFollowing) {
+        // Takibi bırak
+        await api.del(`/api/follow/${encodeURIComponent(userId)}`, authToken);
+      } else {
+        // Takip et
+        await api.post(`/api/follow/${encodeURIComponent(userId)}`, {}, authToken);
+      }
+
+      // Profil ve takip listesi tazelensin
+      await Promise.all([
+        loadUserProfile(userId),
+        typeof loadFollowing === 'function' ? loadFollowing() : Promise.resolve(),
+      ]);
+    } catch (err) {
+      console.error('profileFollowBtn error:', err);
+      alert(err.message || 'İşlem başarısız.');
+    }
+  });
+  }
+
+  if (exploreUsersEl) {
+  exploreUsersEl.addEventListener('click', async (e) => {
+    if (!authToken) return;
+
+    const userLink = e.target.closest('.user-link');
+    if (userLink) {
+      const uid = userLink.dataset.userId;
+      if (uid) {
+        await loadUserProfile(uid);
+      }
       return;
     }
 
-    predictionMessageEl.textContent = 'Tahmin başarıyla mühürlendi.';
-    predictionMessageEl.className = 'message success';
+    const followBtn = e.target.closest('.explore-follow-btn');
+    if (!followBtn) return;
 
-    // Formu sıfırla
-    predictionForm.reset();
-    // (İstersen ekstra güvenlik için:)
-    // predictionTitleEl.value = '';
-    // predictionContentEl.value = '';
+    const userId = followBtn.dataset.userId;
+    const isFollowing = followBtn.dataset.following === 'true';
+    if (!userId) return;
 
-    // Listeleri güncelle
-    loadFeed();
-    loadMyPredictions();
-  } catch (err) {
-    console.error(err);
-    predictionMessageEl.textContent =
-      'Tahmin gönderilirken bir hata oluştu.';
-    predictionMessageEl.className = 'message error';
+    try {
+      if (isFollowing) {
+        // Takibi bırak
+        await api.del(`/api/follow/${encodeURIComponent(userId)}`, authToken);
+      } else {
+        // Takip et
+        await api.post(`/api/follow/${encodeURIComponent(userId)}`, {}, authToken);
+      }
+
+      // Listeyi, takip ettiklerimi ve profili tazele
+      await Promise.all([
+        loadExploreUsers(),
+        loadFollowing(),
+        loadUserProfile(userId),
+      ]);
+    } catch (err) {
+      console.error('explore follow error:', err);
+      alert(err.message || 'İşlem başarısız.');
+    }
+  });
   }
-});
 
 
-  // İlk yüklemede UI ve kategoriler
-  updateAuthUI();
-  loadCategories();
-  if (authToken) {
-    loadFeed();
-    loadMyPredictions();
-    loadFollowing();
-    loadUserProfile(currentUser?.id);
   }
-});
+
+  // =========================
+  // 10) DM (opsiyonel / varsa)
+  // =========================
+
+  if (dmForm && dmMessageInputEl) {
+    dmForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!authToken) return;
+      const text = dmMessageInputEl.value.trim();
+      if (!text) return;
+      try {
+        // Not: projendeki endpoint farklıysa değiştir.
+        await api.post('/api/messages/send', { content: text }, authToken);
+        dmMessageInputEl.value = '';
+        // mesaj listesini yenilemek istersen burada çağır.
+      } catch (err) {
+        alert(err.message || 'Mesaj gönderilemedi.');
+      }
+    });
+  }
+
+  // =========================
+  // 11) İLK YÜKLEME
+  // =========================
+
+  (async function boot() {
+    setUserInfoText();
+    resetDetailPanel();
+    await loadCategories();
+
+    if (authToken) {
+  await loadMeLight();
+  await Promise.all([
+    loadFeed(),
+    loadMyPredictions({}),
+    loadFollowing(),
+    loadExploreUsers(),
+  ]);
+  }
+  })();
+})();
