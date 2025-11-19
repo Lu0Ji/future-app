@@ -220,56 +220,106 @@
   // =========================
 
   async function loadFeed() {
-    if (!feedListEl) return;
-    if (!authToken) {
-      feedListEl.innerHTML = '<p class="small">Henüz veri yok. Giriş yapıp tahmin oluşturduktan sonra burada görünecek.</p>';
+  if (!feedListEl) return;
+
+  if (!authToken) {
+    feedListEl.innerHTML = '<p class="small">Feed\'i görmek için giriş yapın.</p>';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/feed', {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Feed yüklenemedi.');
+    }
+
+    const items = data.data || [];
+
+    feedListEl.innerHTML = '';
+
+    if (items.length === 0) {
+      feedListEl.innerHTML = '<p class="small">Henüz tahmin yok.</p>';
       return;
     }
-    try {
-      const feed = await api.get('/api/feed', authToken);
-      const items = feed.data || feed || [];
 
-      if (!items.length) {
-        feedListEl.innerHTML = '<p class="small">Takip ettiklerinizden veya sizden henüz bir şey yok.</p>';
-        return;
+    items.forEach((p) => {
+      const div = document.createElement('div');
+      div.className = 'feed-item';
+
+      // HTML iskelet
+      div.innerHTML = `
+        <div class="feed-header">
+          <div class="feed-avatar"></div>
+          <div class="feed-main">
+            <div class="feed-top-row">
+              <button class="user-link feed-user"></button>
+              <span class="feed-category"></span>
+              <span class="feed-date"></span>
+            </div>
+            <div class="feed-title-row">
+              <span class="feed-title"></span>
+              <span class="status-badge"></span>
+            </div>
+          </div>
+        </div>
+        <div class="feed-content"></div>
+      `;
+
+      // Verileri hazırla
+      const username = p.username || 'Anon';
+      const avatarLetter = username.charAt(0).toUpperCase();
+      const title =
+        p.title && p.title.trim().length > 0 ? p.title : '(Başlık yok)';
+
+      const statusInfo =
+        p.status === 'correct'
+          ? { label: 'Doğru', className: 'status-correct' }
+          : p.status === 'incorrect'
+          ? { label: 'Yanlış', className: 'status-incorrect' }
+          : { label: 'Bekliyor', className: 'status-pending' };
+
+      // DOM referanslarını al
+      const avatarEl = div.querySelector('.feed-avatar');
+      const userBtn = div.querySelector('.feed-user');
+      const categoryEl = div.querySelector('.feed-category');
+      const dateEl = div.querySelector('.feed-date');
+      const titleEl = div.querySelector('.feed-title');
+      const statusEl = div.querySelector('.status-badge');
+      const contentEl = div.querySelector('.feed-content');
+
+      // Alanları doldur
+      avatarEl.textContent = avatarLetter;
+
+      userBtn.textContent = username;
+      if (p.userId) {
+        userBtn.dataset.userId = p.userId;
       }
 
-      feedListEl.innerHTML = '';
-      items.forEach((p) => {
-        const div = document.createElement('div');
-        div.className = 'feed-item';
+      categoryEl.textContent = p.categoryLabel || p.category || '-';
+      dateEl.textContent = p.targetDate || '';
 
-        const username = escapeHtml(p.username || 'unknown');
-        const cat = escapeHtml(p.category || '');
-        const tDate = fmtDate(p.targetDate);
-        const userId = escapeHtml(p.userId || '');
-        const title = p.isLocked ? 'Mühürlü tahmin' : escapeHtml(p.title || '(Başlık yok)');
-        const content = p.isLocked
-          ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-          : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
+      titleEl.textContent = title;
 
-          div.innerHTML = `
-          <div class="feed-header">
-            <button class="user-link" data-user-id="${userId}"
-              style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0">
-              ${username}
-            </button>
-            <span class="feed-category">${cat}</span>
-            <span class="feed-date">${tDate}</span>
-          </div>
-          <div class="feed-content">
-            <strong>${title}</strong>
-            <div>${content}</div>
-          </div>
-          `;
-        ;
-        feedListEl.appendChild(div);
-      });
-    } catch (err) {
-      console.error('Feed error:', err);
-      feedListEl.innerHTML = '<p class="small">Feed yüklenirken bir hata oluştu.</p>';
-    }
+      statusEl.textContent = statusInfo.label;
+      statusEl.classList.add(statusInfo.className);
+
+      contentEl.textContent = p.content || '';
+
+      feedListEl.appendChild(div);
+    });
+  } catch (err) {
+    console.error('Feed error:', err);
+    feedListEl.innerHTML =
+      '<p class="message error">Feed yüklenemedi. Daha sonra tekrar deneyin.</p>';
   }
+}
+
 
   // =========================
   // 6) BENİM TAHMİNLERİM + DETAY
@@ -546,6 +596,20 @@ async function loadExploreUsers() {
 }
 
 // Belirli kullanıcının profilini ve tahminlerini yükler
+function updateUserInUrl(userId) {
+  try {
+    const url = new URL(window.location.href);
+    if (userId) {
+      url.searchParams.set('user', userId);
+    } else {
+      url.searchParams.delete('user');
+    }
+    window.history.replaceState({}, '', url.toString());
+  } catch (err) {
+    console.error('updateUserInUrl error:', err);
+  }
+}
+
 async function loadUserProfile(userId) {
   if (!authToken) return;
   try {
@@ -814,11 +878,14 @@ async function loadUserProfile(userId) {
 
   if (followingListEl) {
     followingListEl.addEventListener('click', (e) => {
-      const u = e.target.closest('.user-link');
-      if (!u) return;
-      const uid = u.dataset.userId;
-      if (!uid) return;
-      loadUserProfile(uid);
+      const userLink = e.target.closest('.user-link');
+  if (!userLink) return;
+
+    const userId = userLink.dataset.userId;
+  if (userId) {
+  updateUserInUrl(userId);
+  loadUserProfile(userId);
+  }
     });
   }
 
@@ -848,11 +915,16 @@ if (myStatsEl) {
 
   if (feedListEl) {
     feedListEl.addEventListener('click', (e) => {
-    const u = e.target.closest('.user-link');
-    if (!u) return;
-    const uid = u.dataset.userId;
-    if (!uid) return; // backend'den henüz userId gelmiyorsa sessizce çık
-    loadUserProfile(uid);
+    const userLink = e.target.closest('.user-link');
+  if (userLink) {
+    const uid = userLink.dataset.userId;
+    if (uid) {
+      updateUserInUrl(uid);
+      loadUserProfile(uid);
+    }
+    return;
+  }
+
   });
   }
   if (profileFollowBtn) {
@@ -886,16 +958,18 @@ if (myStatsEl) {
 
   if (exploreUsersEl) {
   exploreUsersEl.addEventListener('click', async (e) => {
-    if (!authToken) return;
+  if (!authToken) return;
 
     const userLink = e.target.closest('.user-link');
-    if (userLink) {
-      const uid = userLink.dataset.userId;
-      if (uid) {
-        await loadUserProfile(uid);
-      }
-      return;
-    }
+  if (userLink) {
+    const uid = userLink.dataset.userId;
+  if (uid) {
+    updateUserInUrl(uid);
+    await loadUserProfile(uid);
+  }
+  return;
+  }
+
 
     const followBtn = e.target.closest('.explore-follow-btn');
     if (!followBtn) return;
@@ -959,7 +1033,7 @@ if (myStatsEl) {
     resetDetailPanel();
     await loadCategories();
 
-    if (authToken) {
+  if (authToken) {
   await loadMeLight();
   await Promise.all([
     loadFeed(),
@@ -968,6 +1042,18 @@ if (myStatsEl) {
     loadExploreUsers(),
     loadMyStats(),
   ]);
+
+  // URL'de user parametresi varsa profili otomatik yükle
+  try {
+    const url = new URL(window.location.href);
+    const userIdFromUrl = url.searchParams.get('user');
+    if (userIdFromUrl) {
+      await loadUserProfile(userIdFromUrl);
+    }
+  } catch (err) {
+    console.error('read user from url error:', err);
   }
+}
+
   })();
 })();
