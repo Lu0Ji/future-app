@@ -201,12 +201,14 @@
   // Feed
   const feedListEl = document.getElementById('feed-list');
 
-  // Benim tahminlerim + filtreler
+   // Benim tahminlerim + filtreler
   const myPredictionsListEl = document.getElementById('my-predictions-list');
   const myPredictionsFilterCategoryEl = document.getElementById('my-predictions-filter-category');
   const myPredictionsFilterStatusEl = document.getElementById('my-predictions-filter-status');
   const myPredictionsClearFiltersBtn = document.getElementById('my-predictions-clear-filters');
+  const myPredictionsSummaryEl = document.getElementById('my-predictions-summary');
   const myStatsEl = document.getElementById('my-stats');
+
     // Liderlik ve profil istatistikleri
   const leaderboardCardEl = document.getElementById('leaderboard-card');
   const leaderboardCategoryEl = document.getElementById('leaderboard-category');
@@ -450,16 +452,59 @@
   async function loadMyPredictions(filters = {}) {
   if (!myPredictionsListEl || !authToken) return;
 
-  const params = new URLSearchParams(filters).toString();
-  const url = params ? `/api/predictions/mine?${params}` : '/api/predictions/mine';
+  const categoryFilter = filters.category || '';
+  const statusFilter = filters.status || '';
+
+  const hasFilters = !!(categoryFilter || statusFilter);
+
+  const statusText = statusFilter
+    ? `Durum: ${
+        statusFilter === 'correct'
+          ? 'Doğru'
+          : statusFilter === 'incorrect'
+          ? 'Yanlış'
+          : 'Beklemede'
+      }`
+    : 'Durum: Tümü';
+
+  let categoryText = 'Kategori: Tümü';
+  if (categoryFilter) {
+    let label = categoryFilter;
+    if (myPredictionsFilterCategoryEl) {
+      const sel = myPredictionsFilterCategoryEl;
+      const opt = sel.options[sel.selectedIndex];
+      if (opt && opt.textContent) {
+        label = opt.textContent;
+      }
+    }
+    categoryText = `Kategori: ${label}`;
+  }
+
+  const params = new URLSearchParams();
+  if (categoryFilter) params.set('category', categoryFilter);
+  if (statusFilter) params.set('status', statusFilter);
+  const qs = params.toString();
+  const url = qs ? `/api/predictions/mine?${qs}` : '/api/predictions/mine';
 
   try {
     const data = await api.get(url, authToken);
     const items = data.items || data.data || [];
 
+    const countText =
+      items.length === 0
+        ? 'Hiç tahmin bulunamadı.'
+        : items.length === 1
+        ? '1 tahmin listeleniyor.'
+        : `${items.length} tahmin listeleniyor.`;
+
+    if (myPredictionsSummaryEl) {
+      myPredictionsSummaryEl.textContent = `${statusText} · ${categoryText} · ${countText}`;
+    }
+
     if (!items.length) {
-      myPredictionsListEl.innerHTML =
-        '<p class="small subtle">Henüz tahmin yapmamışsın.</p>';
+      myPredictionsListEl.innerHTML = hasFilters
+        ? '<p class="small subtle">Bu filtrelere uyan tahminin yok.</p>'
+        : '<p class="small subtle">Henüz tahmin yapmamışsın.</p>';
       return;
     }
 
@@ -474,22 +519,37 @@
       const cat = escapeHtml(p.category || '');
       const tDate = fmtDate(p.targetDate);
       const created = fmtDate(p.createdAt);
-      const statusLabel =
-        p.status === 'correct'
-          ? 'Doğru'
-          : p.status === 'incorrect'
-          ? 'Yanlış'
-          : 'Bekliyor';
 
-      const title = p.isLocked
+      const rawStatus = p.status || 'pending';
+      const statusLabel =
+        rawStatus === 'correct'
+          ? 'Doğru'
+          : rawStatus === 'incorrect'
+          ? 'Yanlış'
+          : 'Beklemede';
+
+      const statusClass =
+        rawStatus === 'correct'
+          ? 'status-correct'
+          : rawStatus === 'incorrect'
+          ? 'status-incorrect'
+          : 'status-pending';
+
+      const isLocked = !!p.isLocked;
+
+      const titleText = isLocked
         ? 'Mühürlü tahmin'
         : escapeHtml(p.title || '(Başlık yok)');
-      const contentHtml = p.isLocked
+      const contentHtml = isLocked
         ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
         : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
 
       const likesCount = p.likesCount ?? 0;
       const liked = !!p.liked;
+
+      const metaText = created
+        ? `Oluşturma: ${created} · Açılma: ${tDate}`
+        : `Açılma: ${tDate}`;
 
       div.innerHTML = `
         <div class="feed-header">
@@ -497,21 +557,26 @@
           <span class="feed-date">${tDate}</span>
         </div>
         <div class="feed-content">
-          <strong>${title}</strong>
+          <strong>${isLocked ? '🔒 ' : ''}${titleText}</strong>
           <div>${contentHtml}</div>
         </div>
         <div class="feed-footer">
           <span class="small subtle">
-            Durum: ${statusLabel}${created ? ` · Oluşturma: ${created}` : ''}
+            ${metaText}
           </span>
-          <button
-            type="button"
-            class="like-pill ${liked ? 'liked' : ''}"
-            data-id="${p.id}"
-          >
-            <span class="like-icon">👍</span>
-            <span class="like-count">${likesCount}</span>
-          </button>
+          <div class="feed-footer-right">
+            <span class="prediction-status-pill ${statusClass}">
+              ${statusLabel}
+            </span>
+            <button
+              type="button"
+              class="like-pill ${liked ? 'liked' : ''}"
+              data-id="${p.id}"
+            >
+              <span class="like-icon">👍</span>
+              <span class="like-count">${likesCount}</span>
+            </button>
+          </div>
         </div>
       `;
 
@@ -523,6 +588,7 @@
       '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
   }
 }
+
 async function loadMyStats() {
   if (!myStatsEl || !authToken) return;
 
