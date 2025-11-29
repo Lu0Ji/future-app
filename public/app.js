@@ -193,6 +193,9 @@
   const categorySelectEl = document.getElementById('prediction-category');
   const predictionMessageEl = document.getElementById('prediction-message');
   const predictionFromCommentHintEl = document.getElementById('prediction-from-comment-hint');
+  const predictionSubmitBtn =
+    predictionForm?.querySelector('button[type="submit"]');
+
 
 
   // Feed
@@ -220,6 +223,8 @@
   const commentForm = document.getElementById('comment-form');
   const commentContentEl = document.getElementById('comment-content');
   const commentMessageEl = document.getElementById('comment-message');
+  const commentSubmitBtn =
+    commentForm?.querySelector('button[type="submit"]');
 
   // Profil / DM (varsa çalışır)
   const profileDetailsEl = document.getElementById('profile-details');
@@ -1360,16 +1365,32 @@ async function loadUserProfile(userId) {
   });
 }
 
-  // =========================
-  // 8) TAHMİN OLUŞTURMA
+    // 8) TAHMİN OLUŞTURMA
   // =========================
 
   if (predictionForm) {
     predictionForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+
+      // Önce önceki hata durumlarını temizle
+      if (predictionMessageEl) {
+        predictionMessageEl.textContent = '';
+        predictionMessageEl.className = 'message';
+      }
+
+      [
+        predictionTitleEl,
+        predictionContentEl,
+        predictionDateEl,
+        categorySelectEl,
+      ].forEach((el) => {
+        if (el) el.classList.remove('input-error');
+      });
+
       if (!authToken) {
         if (predictionMessageEl) {
-          predictionMessageEl.textContent = 'Tahmin göndermek için önce giriş yapın.';
+          predictionMessageEl.textContent =
+            'Tahmin göndermek için önce giriş yapın.';
           predictionMessageEl.className = 'message error';
         }
         return;
@@ -1380,40 +1401,104 @@ async function loadUserProfile(userId) {
       const targetDate = predictionDateEl?.value || '';
       const category = categorySelectEl?.value || '';
 
-      if (!title || !content || !targetDate || !category) {
+      const missingFields = [];
+
+      if (!title) {
+        missingFields.push('Başlık');
+        predictionTitleEl?.classList.add('input-error');
+      }
+      if (!content) {
+        missingFields.push('Tahmin');
+        predictionContentEl?.classList.add('input-error');
+      }
+      if (!targetDate) {
+        missingFields.push('Açılma tarihi');
+        predictionDateEl?.classList.add('input-error');
+      }
+      if (!category) {
+        missingFields.push('Kategori');
+        categorySelectEl?.classList.add('input-error');
+      }
+
+      if (missingFields.length > 0) {
         if (predictionMessageEl) {
-          predictionMessageEl.textContent = 'Lütfen başlık, tahmin, tarih ve kategoriyi doldurun.';
+          predictionMessageEl.textContent =
+            'Lütfen şu alanları doldurun: ' + missingFields.join(', ');
           predictionMessageEl.className = 'message error';
         }
         return;
       }
 
-        try {
+      // Tarih bugün veya gelecek olmalı (UX tarafında da kontrol edelim)
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (targetDate < todayStr) {
+        predictionDateEl?.classList.add('input-error');
+        if (predictionMessageEl) {
+          predictionMessageEl.textContent =
+            'Açılma tarihi bugünden eski olamaz.';
+          predictionMessageEl.className = 'message error';
+        }
+        return;
+      }
+
+      // Aynı anda birden fazla gönderimi engelle
+      if (predictionForm.dataset.submitting === '1') {
+        return;
+      }
+      predictionForm.dataset.submitting = '1';
+      if (predictionSubmitBtn) {
+        predictionSubmitBtn.disabled = true;
+        predictionSubmitBtn.textContent = 'Gönderiliyor...';
+      }
+
+      try {
         const body = { title, content, targetDate, category };
 
-          if (activeSourceCommentId) {
-            body.sourceCommentId = activeSourceCommentId;
-          }
+        if (activeSourceCommentId) {
+          body.sourceCommentId = activeSourceCommentId;
+        }
 
-          await api.post('/api/predictions', body, authToken);
+        await api.post('/api/predictions', body, authToken);
 
-          // başarı sonrası:
-          predictionForm.reset();
-          activeSourceCommentId = null;
+        // başarı sonrası:
+        predictionForm.reset();
+        activeSourceCommentId = null;
 
-          if (predictionFromCommentHintEl) {
-            predictionFromCommentHintEl.textContent = '';
-          }
+        if (predictionFromCommentHintEl) {
+          predictionFromCommentHintEl.textContent = '';
+        }
 
-          await Promise.all([loadFeed(), loadMyPredictions({})]);
-
-          if (selectedPredictionId) {
-            await loadCommentsForPrediction(selectedPredictionId);
-          }
-      } catch (err) {
         if (predictionMessageEl) {
-          predictionMessageEl.textContent = err.message || 'Tahmin oluşturulamadı.';
+          const niceDate = targetDate;
+          predictionMessageEl.textContent =
+            niceDate
+              ? `Tahminin ${niceDate} tarihine kadar mühürlendi. 🎉`
+              : 'Tahminin mühürlendi. 🎉';
+          predictionMessageEl.className = 'message success';
+        }
+
+        // Feed ve "Benim tahminlerim"i tazele
+        await Promise.all([loadFeed(), loadMyPredictions({})]);
+
+        // Eğer sağda bir tahmin detayı açıksa ve bu tahminle ilgiliyse, yorumları yenile
+        if (
+          selectedPredictionId &&
+          typeof loadCommentsForPrediction === 'function'
+        ) {
+          await loadCommentsForPrediction(selectedPredictionId);
+        }
+      } catch (err) {
+        console.error('create prediction error:', err);
+        if (predictionMessageEl) {
+          predictionMessageEl.textContent =
+            err?.message || 'Tahmin oluşturulamadı.';
           predictionMessageEl.className = 'message error';
+        }
+      } finally {
+        predictionForm.dataset.submitting = '0';
+        if (predictionSubmitBtn) {
+          predictionSubmitBtn.disabled = false;
+          predictionSubmitBtn.textContent = 'Tahmini mühürle';
         }
       }
     });
@@ -1426,77 +1511,100 @@ async function loadUserProfile(userId) {
   // =========================
 
   if (commentForm) {
-  commentForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation(); // aynı elemana eklenmiş diğer submit listener'larını da durdurur
+    commentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation(); // aynı elemana eklenmiş diğer submit listener'larını da durdurur
 
-    // Aynı anda ikinci kez tetiklenmeyi engelle (çift tıklama vs.)
-    if (commentForm.dataset.submitting === '1') {
-      return;
-    }
-    commentForm.dataset.submitting = '1';
-
-    if (!authToken) {
+      // Önce önceki mesaj ve hata sınıflarını temizle
       if (commentMessageEl) {
-        commentMessageEl.textContent =
-          'Yorum eklemek için önce giriş yapın.';
-        commentMessageEl.className = 'message error';
-      }
-      commentForm.dataset.submitting = '0';
-      return;
-    }
-
-    if (!selectedPredictionId) {
-      if (commentMessageEl) {
-        commentMessageEl.textContent = 'Önce bir tahmin seçin.';
-        commentMessageEl.className = 'message error';
-      }
-      commentForm.dataset.submitting = '0';
-      return;
-    }
-
-    const content = (commentContentEl?.value || '').trim();
-    if (!content) {
-      if (commentMessageEl) {
-        commentMessageEl.textContent = 'Yorum boş olamaz.';
-        commentMessageEl.className = 'message error';
-      }
-      commentForm.dataset.submitting = '0';
-      return;
-    }
-
-    try {
-      await api.post(
-        `/api/predictions/${encodeURIComponent(selectedPredictionId)}/comments`,
-        { content },
-        authToken
-      );
-
-      if (commentMessageEl) {
-        commentMessageEl.textContent = 'Yorum eklendi.';
-        commentMessageEl.className = 'message success';
+        commentMessageEl.textContent = '';
+        commentMessageEl.className = 'message';
       }
       if (commentContentEl) {
-        commentContentEl.value = '';
+        commentContentEl.classList.remove('input-error');
       }
 
-      await loadCommentsForPrediction(selectedPredictionId);
-    } catch (err) {
-      console.error('comment submit error:', err);
-      if (commentMessageEl) {
-        commentMessageEl.textContent =
-          err.message || 'Yorum eklenirken bir hata oluştu.';
-        commentMessageEl.className = 'message error';
+      // Aynı anda ikinci kez tetiklenmeyi engelle (çift tıklama vs.)
+      if (commentForm.dataset.submitting === '1') {
+        return;
       }
-    } finally {
-      commentForm.dataset.submitting = '0';
-    }
-  });
-}
 
+      if (!authToken) {
+        if (commentMessageEl) {
+          commentMessageEl.textContent =
+            'Yorum eklemek için önce giriş yapın.';
+          commentMessageEl.className = 'message error';
+        }
+        return;
+      }
+
+      if (!selectedPredictionId) {
+        if (commentMessageEl) {
+          commentMessageEl.textContent = 'Önce bir tahmin seçin.';
+          commentMessageEl.className = 'message error';
+        }
+        return;
+      }
+
+      const content = (commentContentEl?.value || '').trim();
+      if (!content) {
+        if (commentMessageEl) {
+          commentMessageEl.textContent = 'Yorum boş olamaz.';
+          commentMessageEl.className = 'message error';
+        }
+        if (commentContentEl) {
+          commentContentEl.classList.add('input-error');
+          commentContentEl.focus();
+        }
+        return;
+      }
+
+      // Artık gerçekten gönderiyoruz
+      commentForm.dataset.submitting = '1';
+      if (commentSubmitBtn) {
+        commentSubmitBtn.disabled = true;
+        commentSubmitBtn.textContent = 'Gönderiliyor...';
+      }
+
+      try {
+        await api.post(
+          `/api/predictions/${encodeURIComponent(
+            selectedPredictionId
+          )}/comments`,
+          { content },
+          authToken
+        );
+
+        if (commentMessageEl) {
+          commentMessageEl.textContent = 'Yorum eklendi.';
+          commentMessageEl.className = 'message success';
+        }
+        if (commentContentEl) {
+          commentContentEl.value = '';
+          commentContentEl.classList.remove('input-error');
+        }
+
+        await loadCommentsForPrediction(selectedPredictionId);
+      } catch (err) {
+        console.error('comment submit error:', err);
+        if (commentMessageEl) {
+          commentMessageEl.textContent =
+            err.message || 'Yorum eklenirken bir hata oluştu.';
+          commentMessageEl.className = 'message error';
+        }
+      } finally {
+        commentForm.dataset.submitting = '0';
+        if (commentSubmitBtn) {
+          commentSubmitBtn.disabled = false;
+          commentSubmitBtn.textContent = 'Yorum ekle';
+        }
+      }
+    });
+  }
 
   // =========================
+
   // 10) BENİM TAHMİNLERİM FİLTRELERİ
 
   // =========================
