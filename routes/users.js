@@ -68,13 +68,13 @@ router.get('/:id', auth, async (req, res) => {
     const accuracy = resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
 
     // Tahminler (kısıt)
-    // Başkalarının profiline bakıyorsak, sadece hedef tarihi gelmiş (açılmış) tahminleri göster.
+    // Artık profil sayfasında mühürlü tahminler de listelenecek.
+    // Kilit bilgisini isLocked üzerinden döndürüyoruz, içerik tarafını oradan kontrol ediyoruz.
     const todayStr = new Date().toISOString().split('T')[0];
 
     const query = { user: id };
-    if (!isSelf) {
-      query.targetDate = { $lte: new Date(`${todayStr}T23:59:59.999Z`) };
-    }
+    // NOT: targetDate filtresi yok; hem açılmış hem mühürlü tahminler gelecek.
+
 
     const preds = await Prediction.find(query)
       .sort({ createdAt: -1 })
@@ -93,9 +93,9 @@ router.get('/:id', auth, async (req, res) => {
         targetDate: targetStr,
         createdAt: createdStr,
         status: p.status || 'pending',
-        title: isLocked ? null : (p.title || null),
-        // içerik: hedef tarih gelene kadar KİMSE (sahibi dahil) göremez
-        content: isLocked ? null : p.content,
+        // Mühürlü tahminlerin başlığı görülebilir; içerik mühür çözülene kadar gizli
+        title: p.title || '',
+        content: isLocked ? null : (p.content || ''),
         isLocked,
       };
     });

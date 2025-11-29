@@ -865,8 +865,6 @@ async function loadCommentsForPrediction(predictionId) {
   }
 }
 
-
-
 async function loadPredictionDetail(predictionId) {
   if (!predictionDetailEl) return;
 
@@ -883,43 +881,104 @@ async function loadPredictionDetail(predictionId) {
   }
 
   try {
-    const data = await api.get(`/api/predictions/${predictionId}`, authToken);
+    const data = await api.get(
+      `/api/predictions/${encodeURIComponent(predictionId)}`,
+      authToken
+    );
 
+    if (!data || data.error) {
+      predictionDetailEl.innerHTML =
+        '<p class="small">Detay bulunamadı.</p>';
+      if (commentsListEl) {
+        commentsListEl.innerHTML =
+          '<p class="small">Yorumlar yüklenemedi.</p>';
+      }
+      selectedPredictionId = null;
+      return;
+    }
+
+    const rawStatus = data.status || 'pending';
     const statusLabel =
-      data.status === 'correct'
+      rawStatus === 'correct'
         ? 'Doğru'
-        : data.status === 'incorrect'
+        : rawStatus === 'incorrect'
         ? 'Yanlış'
-        : 'Bekliyor';
+        : 'Beklemede';
+
+    const statusClass =
+      rawStatus === 'correct'
+        ? 'status-correct'
+        : rawStatus === 'incorrect'
+        ? 'status-incorrect'
+        : 'status-pending';
 
     const ownerName = escapeHtml(data.user?.username || 'Bilinmiyor');
     const cat = escapeHtml(data.category || '');
     const tDate = fmtDate(data.targetDate);
     const created = fmtDate(data.createdAt);
+    const resolved = fmtDate(data.resolvedAt);
 
-    const title = data.isLocked
+    const isLocked = !!data.isLocked;
+
+    const titleText = isLocked
       ? 'Mühürlü tahmin'
       : escapeHtml(data.title || '(Başlık yok)');
-    const contentHtml = data.isLocked
-      ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-      : escapeHtml(data.content || '').replace(/\n/g, '<br/>');
+
+    const bodyHtml = isLocked
+      ? '<p class="prediction-lock-note small">İçerik hedef tarih gelene kadar tamamen gizli.</p>'
+      : `<p class="prediction-body">${escapeHtml(data.content || '')
+          .replace(/\n/g, '<br/>')}</p>`;
 
     const likesCount = data.likesCount ?? 0;
     const liked = !!data.liked;
 
+    let statusInfo = '';
+    if (rawStatus === 'correct') {
+      statusInfo = resolved
+        ? `Bu tahmin ${resolved} tarihinde <strong>Doğru</strong> olarak işaretlendi.`
+        : 'Bu tahmin <strong>Doğru</strong> olarak işaretlendi.';
+    } else if (rawStatus === 'incorrect') {
+      statusInfo = resolved
+        ? `Bu tahmin ${resolved} tarihinde <strong>Yanlış</strong> olarak işaretlendi.`
+        : 'Bu tahmin <strong>Yanlış</strong> olarak işaretlendi.';
+    } else {
+      statusInfo = tDate
+        ? `Bu tahmin ${tDate} tarihine kadar beklemede.`
+        : 'Bu tahmin şu anda beklemede.';
+    }
+
     predictionDetailEl.innerHTML = `
-      <div class="feed-item" data-id="${data.id}">
-        <div class="feed-header">
-          <span class="feed-user">${ownerName}</span>
-          <span class="feed-category">${cat}</span>
-          <span class="feed-date">${tDate}</span>
+      <div class="prediction-detail-card feed-item" data-id="${data.id}">
+        <div class="prediction-detail-header">
+          <div class="prediction-user">
+            <div class="avatar-circle">
+              ${ownerName.charAt(0).toUpperCase()}
+            </div>
+            <div class="prediction-user-meta">
+              <div class="prediction-username">${ownerName}</div>
+              <div class="prediction-meta small">
+                <span>${cat}</span>
+                ${tDate ? `<span>· Açılma: ${tDate}</span>` : ''}
+              </div>
+            </div>
+          </div>
+          <div class="prediction-status-pill ${statusClass}">
+            ${statusLabel}
+          </div>
         </div>
-        <div class="feed-content">
-          <strong>${title}</strong>
-          <div>${contentHtml}</div>
+
+        <div class="prediction-detail-body">
+          <h3 class="prediction-title">${titleText}</h3>
+          ${bodyHtml}
         </div>
-        <div class="feed-footer">
-          <span>Durum: ${statusLabel} ${created ? `· Oluşturma: ${created}` : ''}</span>
+
+        <div class="prediction-meta-row small">
+          ${created ? `<span>Oluşturma: ${created}</span>` : ''}
+          ${resolved ? `<span>Çözülme: ${resolved}</span>` : ''}
+        </div>
+
+        <div class="prediction-detail-footer">
+          <span class="small subtle">${statusInfo}</span>
           <button
             type="button"
             class="like-pill ${liked ? 'liked' : ''}"
@@ -932,7 +991,6 @@ async function loadPredictionDetail(predictionId) {
       </div>
     `;
 
-    // 4.5'in yaptığı iş tam olarak burası:
     // Detay geldiği anda ilgili tahminin yorumlarını da yükle
     if (typeof loadCommentsForPrediction === 'function') {
       await loadCommentsForPrediction(predictionId);
@@ -949,8 +1007,6 @@ async function loadPredictionDetail(predictionId) {
     selectedPredictionId = null;
   }
 }
-
-
 
 
 // Takip ettiklerim listesini yükler
@@ -1163,9 +1219,9 @@ async function loadUserProfile(userId) {
           div.className = 'feed-item';
           div.dataset.id = p.id;       // detayı açmak için
           div.style.cursor = 'pointer';
-          const title = p.isLocked
-            ? 'Mühürlü tahmin'
-            : escapeHtml(p.title || '(Başlık yok)');
+          const title = escapeHtml(
+           p.title || (p.isLocked ? 'Mühürlü tahmin' : '(Başlık yok)')
+         );
           const content = p.isLocked
             ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
             : escapeHtml(p.content || '').replace(/\n/g, '<br/>');

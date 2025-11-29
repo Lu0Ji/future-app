@@ -446,6 +446,132 @@ body {
 #prediction-detail {
   font-size: 13px;
 }
+/* Tahmin detay kartı */
+
+.prediction-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prediction-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.prediction-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prediction-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prediction-username {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.prediction-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.prediction-meta span::before {
+  content: '';
+}
+
+.avatar-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: radial-gradient(
+    circle at top left,
+    rgba(37, 99, 235, 0.4),
+    rgba(15, 23, 42, 0.95)
+  );
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.prediction-status-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+}
+
+.prediction-status-pill.status-pending {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+
+.prediction-status-pill.status-correct {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.prediction-status-pill.status-incorrect {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.prediction-detail-body {
+  margin-top: 2px;
+}
+
+.prediction-title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+}
+
+.prediction-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.prediction-lock-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.prediction-meta-row {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.prediction-detail-footer {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 
 #prediction-comments {
   margin-top: 8px;
