@@ -21,6 +21,74 @@
     return d.toISOString().split('T')[0];
   };
 
+  async function handleLikeToggle(buttonEl) {
+  if (!buttonEl) return;
+  if (!authToken) {
+    alert('Beğenmek için önce giriş yapmalısınız.');
+    return;
+  }
+
+  // Buton üzerinde data-id yoksa, en yakın feed-item'dan al
+  let id = buttonEl.dataset.id;
+  if (!id) {
+    const item = buttonEl.closest('.feed-item');
+    if (item && item.dataset.id) {
+      id = item.dataset.id;
+    }
+  }
+  if (!id) return;
+
+  try {
+    const res = await api.post(
+      `/api/predictions/${encodeURIComponent(id)}/like`,
+      {},
+      authToken
+    );
+
+    const liked = !!res.liked;
+    const count = res.likesCount ?? 0;
+
+    // Görsel güncelleme
+    buttonEl.classList.toggle('liked', liked);
+    const countSpan = buttonEl.querySelector('.like-count');
+    if (countSpan) {
+      countSpan.textContent = count;
+    }
+  } catch (err) {
+    console.error('like toggle error:', err);
+    alert('Beğeni işlemi sırasında bir hata oluştu.');
+  }
+}
+
+
+  function prefillPredictionFormFromComment(comment) {
+  if (!predictionTitleEl || !predictionContentEl) return;
+
+  // Başlık boşsa default bir şey ver
+  if (!predictionTitleEl.value) {
+    predictionTitleEl.value = 'Yorumdan üretilen tahmin';
+  }
+
+  predictionContentEl.value = comment.content || '';
+
+  activeSourceCommentId = comment.id;
+
+  if (predictionFromCommentHintEl) {
+    const created = fmtDate(comment.createdAt);
+    predictionFromCommentHintEl.textContent =
+      `Bu tahmin, ${created || 'bu'} tarihli yorumundan oluşturulacak.`;
+  }
+
+  if (predictionMessageEl) {
+    predictionMessageEl.textContent = '';
+    predictionMessageEl.className = 'message';
+  }
+
+  // Kullanıcıyı form alanına odakla (opsiyonel)
+  predictionTitleEl.focus();
+}
+
+
   // Basit fetch helper’ları:
   const api = {
     async get(url, token) {
@@ -68,12 +136,43 @@
     },
   };
 
+  function prefillPredictionFormFromComment(comment) {
+  if (!predictionTitleEl || !predictionContentEl) return;
+
+  // Başlık boşsa varsayılan bir başlık ver
+  if (!predictionTitleEl.value) {
+    predictionTitleEl.value = 'Yorumdan üretilen tahmin';
+  }
+
+  predictionContentEl.value = comment.content || '';
+  activeSourceCommentId = comment.id;
+
+  if (predictionFromCommentHintEl) {
+    const created = fmtDate(comment.createdAt);
+    predictionFromCommentHintEl.textContent =
+      `Bu tahmin, ${created || 'bu'} tarihli yorumundan oluşturulacak.`;
+  }
+
+  if (predictionMessageEl) {
+    predictionMessageEl.textContent = '';
+    predictionMessageEl.className = 'message';
+  }
+
+  predictionTitleEl.focus();
+}
+
+
   // =========================
   // 1) GLOBAL DURUM
   // =========================
 
   let authToken = localStorage.getItem('token') || '';
   let currentUser = null; // {id, username} dolacak
+  let selectedPredictionId = null; // Detayda seçili tahmin
+  let activeSourceCommentId = null; // Yorumdan tahmin üretirken kullanacağız
+  let currentComments = []; // Son yüklenen yorum listesi
+
+
 
   // =========================
   // 2) DOM ELEMANLARI (önce hepsini topla)
@@ -93,6 +192,8 @@
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
   const predictionMessageEl = document.getElementById('prediction-message');
+  const predictionFromCommentHintEl = document.getElementById('prediction-from-comment-hint');
+
 
   // Feed
   const feedListEl = document.getElementById('feed-list');
@@ -103,13 +204,26 @@
   const myPredictionsFilterStatusEl = document.getElementById('my-predictions-filter-status');
   const myPredictionsClearFiltersBtn = document.getElementById('my-predictions-clear-filters');
   const myStatsEl = document.getElementById('my-stats');
+    // Liderlik ve profil istatistikleri
+  const leaderboardCardEl = document.getElementById('leaderboard-card');
+  const leaderboardCategoryEl = document.getElementById('leaderboard-category');
+  const leaderboardMinResolvedEl = document.getElementById('leaderboard-min-resolved');
+  const leaderboardRefreshBtn = document.getElementById('leaderboard-refresh');
+  const leaderboardBodyEl = document.getElementById('leaderboard-body');
 
 
   // Detay paneli
   const predictionDetailEl = document.getElementById('prediction-detail');
 
+  // Yorumlar
+  const commentsListEl = document.getElementById('comments-list');
+  const commentForm = document.getElementById('comment-form');
+  const commentContentEl = document.getElementById('comment-content');
+  const commentMessageEl = document.getElementById('comment-message');
+
   // Profil / DM (varsa çalışır)
   const profileDetailsEl = document.getElementById('profile-details');
+  const profileCategoryStatsEl = document.getElementById('profile-category-stats');
   const profilePredictionsEl = document.getElementById('profile-predictions');
   const followingListEl = document.getElementById('following-list');
   const exploreUsersEl = document.getElementById('explore-users');
@@ -144,12 +258,27 @@
     }
   }
 
-  function resetDetailPanel() {
+    function resetDetailPanel() {
+    selectedPredictionId = null;
+
     if (predictionDetailEl) {
       predictionDetailEl.innerHTML =
         '<p class="small">Bir tahmine tıklayarak detayını burada görebilirsiniz.</p>';
     }
+
+    if (commentsListEl) {
+      commentsListEl.innerHTML =
+        '<p class="small">Bu tahmine henüz yorum yapılmamış.</p>';
+    }
+    if (commentMessageEl) {
+      commentMessageEl.textContent = '';
+      commentMessageEl.className = 'message';
+    }
+    if (commentContentEl) {
+      commentContentEl.value = '';
+    }
   }
+
 
   async function loadMeLight() {
     // Token varsa kullanıcı adını almak için hafif yol: /api/stats/me (projende var)
@@ -198,6 +327,23 @@
           myPredictionsFilterCategoryEl.appendChild(opt);
         });
       }
+
+      // Liderlik tablosu kategori seçimi
+      if (leaderboardCategoryEl) {
+        leaderboardCategoryEl.innerHTML = '';
+        const all = document.createElement('option');
+        all.value = '';
+        all.textContent = 'Tüm kategoriler';
+        leaderboardCategoryEl.appendChild(all);
+
+        categories.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c.key;
+          opt.textContent = c.label;
+          leaderboardCategoryEl.appendChild(opt);
+        });
+      }
+
     } catch (err) {
       console.error('Kategori yükleme hatası:', err);
       if (categorySelectEl) {
@@ -209,181 +355,282 @@
       }
     }
   }
-  // =========================
-  // 4.5) TAKİP ETTİKLERİM
-  // =========================
 
-  
 
   // =========================
   // 5) FEED
   // =========================
 
   async function loadFeed() {
-  if (!feedListEl) return;
-
-  if (!authToken) {
-    feedListEl.innerHTML = '<p class="small">Feed\'i görmek için giriş yapın.</p>';
-    return;
-  }
+  if (!feedListEl || !authToken) return;
 
   try {
-    const res = await fetch('/api/feed', {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-    });
+    const data = await api.get('/api/feed', authToken);
+    const items = data.items || data.data || [];
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Feed yüklenemedi.');
-    }
-
-    const items = data.data || [];
-
-    feedListEl.innerHTML = '';
-
-    if (items.length === 0) {
-      feedListEl.innerHTML = '<p class="small">Henüz tahmin yok.</p>';
+    if (!items.length) {
+      feedListEl.innerHTML =
+        '<p class="small subtle">Akış boş. Tahmin yap ya da birilerini takip et.</p>';
       return;
     }
+
+    feedListEl.innerHTML = '';
 
     items.forEach((p) => {
       const div = document.createElement('div');
       div.className = 'feed-item';
+      div.dataset.id = p.id;
+      div.style.cursor = 'pointer';
 
-      // HTML iskelet
+      const userName = escapeHtml(p.user?.username || 'Bilinmiyor');
+      const cat = escapeHtml(p.category || '');
+      const tDate = fmtDate(p.targetDate);
+      const created = fmtDate(p.createdAt);
+      const title = p.isLocked
+        ? 'Mühürlü tahmin'
+        : escapeHtml(p.title || '(Başlık yok)');
+      const contentHtml = p.isLocked
+        ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
+        : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
+
+      const likesCount = p.likesCount ?? 0;
+      const liked = !!p.liked;
+
       div.innerHTML = `
         <div class="feed-header">
-          <div class="feed-avatar"></div>
-          <div class="feed-main">
-            <div class="feed-top-row">
-              <button class="user-link feed-user"></button>
-              <span class="feed-category"></span>
-              <span class="feed-date"></span>
-            </div>
-            <div class="feed-title-row">
-              <span class="feed-title"></span>
-              <span class="status-badge"></span>
-            </div>
-          </div>
+          <button
+            class="user-link"
+            data-user-id="${escapeHtml(p.user?.id || '')}"
+            style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0"
+          >
+            ${userName}
+          </button>
+          <span class="feed-category">${cat}</span>
+          <span class="feed-date">${tDate}</span>
         </div>
-        <div class="feed-content"></div>
+        <div class="feed-content">
+          <strong>${title}</strong>
+          <div>${contentHtml}</div>
+        </div>
+        <div class="feed-footer">
+          <span class="small subtle">
+            ${created ? `Oluşturma: ${created}` : ''}
+          </span>
+          <button
+            type="button"
+            class="like-pill ${liked ? 'liked' : ''}"
+            data-id="${p.id}"
+          >
+            <span class="like-icon">👍</span>
+            <span class="like-count">${likesCount}</span>
+          </button>
+        </div>
       `;
-
-      // Verileri hazırla
-      const username = p.username || 'Anon';
-      const avatarLetter = username.charAt(0).toUpperCase();
-      const title =
-        p.title && p.title.trim().length > 0 ? p.title : '(Başlık yok)';
-
-      const statusInfo =
-        p.status === 'correct'
-          ? { label: 'Doğru', className: 'status-correct' }
-          : p.status === 'incorrect'
-          ? { label: 'Yanlış', className: 'status-incorrect' }
-          : { label: 'Bekliyor', className: 'status-pending' };
-
-      // DOM referanslarını al
-      const avatarEl = div.querySelector('.feed-avatar');
-      const userBtn = div.querySelector('.feed-user');
-      const categoryEl = div.querySelector('.feed-category');
-      const dateEl = div.querySelector('.feed-date');
-      const titleEl = div.querySelector('.feed-title');
-      const statusEl = div.querySelector('.status-badge');
-      const contentEl = div.querySelector('.feed-content');
-
-      // Alanları doldur
-      avatarEl.textContent = avatarLetter;
-
-      userBtn.textContent = username;
-      if (p.userId) {
-        userBtn.dataset.userId = p.userId;
-      }
-
-      categoryEl.textContent = p.categoryLabel || p.category || '-';
-      dateEl.textContent = p.targetDate || '';
-
-      titleEl.textContent = title;
-
-      statusEl.textContent = statusInfo.label;
-      statusEl.classList.add(statusInfo.className);
-
-      contentEl.textContent = p.content || '';
 
       feedListEl.appendChild(div);
     });
   } catch (err) {
-    console.error('Feed error:', err);
+    console.error('loadFeed error:', err);
     feedListEl.innerHTML =
-      '<p class="message error">Feed yüklenemedi. Daha sonra tekrar deneyin.</p>';
+      '<p class="small">Akış yüklenirken bir hata oluştu.</p>';
   }
 }
+
 
 
   // =========================
   // 6) BENİM TAHMİNLERİM + DETAY
   // =========================
 
-  async function loadMyPredictions(options = {}) {
-    if (!myPredictionsListEl) return;
+  async function loadMyPredictions(filters = {}) {
+  if (!myPredictionsListEl || !authToken) return;
 
-    if (!authToken) {
-      myPredictionsListEl.innerHTML = '<p class="small">Tahminlerinizi görmek için giriş yapın.</p>';
+  const params = new URLSearchParams(filters).toString();
+  const url = params ? `/api/predictions/mine?${params}` : '/api/predictions/mine';
+
+  try {
+    const data = await api.get(url, authToken);
+    const items = data.items || data.data || [];
+
+    if (!items.length) {
+      myPredictionsListEl.innerHTML =
+        '<p class="small subtle">Henüz tahmin yapmamışsın.</p>';
       return;
     }
 
-    try {
-      const params = new URLSearchParams();
-      if (options.category) params.append('category', options.category);
-      if (options.status) params.append('status', options.status);
+    myPredictionsListEl.innerHTML = '';
 
-      const qs = params.toString() ? `?${params.toString()}` : '';
-      const data = await api.get(`/api/predictions/mine${qs}`, authToken);
-      const items = data.data || [];
+    items.forEach((p) => {
+      const div = document.createElement('div');
+      div.className = 'feed-item';
+      div.dataset.id = p.id;
+      div.style.cursor = 'pointer';
 
-      if (!items.length) {
-        myPredictionsListEl.innerHTML =
-          '<p class="small">Henüz tahmininiz yok (veya filtrelere uyan tahmin bulunamadı).</p>';
-        return;
-      }
+      const cat = escapeHtml(p.category || '');
+      const tDate = fmtDate(p.targetDate);
+      const created = fmtDate(p.createdAt);
+      const statusLabel =
+        p.status === 'correct'
+          ? 'Doğru'
+          : p.status === 'incorrect'
+          ? 'Yanlış'
+          : 'Bekliyor';
 
-      myPredictionsListEl.innerHTML = '';
-      items.forEach((p) => {
-        const div = document.createElement('div');
-        div.className = 'feed-item';
-        div.dataset.id = p.id;
-        div.style.cursor = 'pointer';
+      const title = p.isLocked
+        ? 'Mühürlü tahmin'
+        : escapeHtml(p.title || '(Başlık yok)');
+      const contentHtml = p.isLocked
+        ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
+        : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
 
-        const statusLabel =
-          p.status === 'correct' ? 'Doğru' :
-          p.status === 'incorrect' ? 'Yanlış' : 'Bekliyor';
+      const likesCount = p.likesCount ?? 0;
+      const liked = !!p.liked;
 
-        const headerTitle = p.isLocked ? 'Mühürlü tahmin' : escapeHtml(p.title || '(Başlık yok)');
-        const contentHtml = p.isLocked
-          ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-          : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
+      div.innerHTML = `
+        <div class="feed-header">
+          <span class="feed-category">${cat}</span>
+          <span class="feed-date">${tDate}</span>
+        </div>
+        <div class="feed-content">
+          <strong>${title}</strong>
+          <div>${contentHtml}</div>
+        </div>
+        <div class="feed-footer">
+          <span class="small subtle">
+            Durum: ${statusLabel}${created ? ` · Oluşturma: ${created}` : ''}
+          </span>
+          <button
+            type="button"
+            class="like-pill ${liked ? 'liked' : ''}"
+            data-id="${p.id}"
+          >
+            <span class="like-icon">👍</span>
+            <span class="like-count">${likesCount}</span>
+          </button>
+        </div>
+      `;
 
-        div.innerHTML = `
-          <div class="feed-header">
-            <span class="feed-category">${escapeHtml(p.category || '')}</span>
-            <span class="feed-date">${fmtDate(p.targetDate)}</span>
-          </div>
-          <div class="feed-content">
-            <strong>${headerTitle}</strong>
-            <div>${contentHtml}</div>
-          </div>
-          <div class="feed-footer">
-            Durum: ${statusLabel}
+      myPredictionsListEl.appendChild(div);
+    });
+  } catch (err) {
+    console.error('loadMyPredictions error:', err);
+    myPredictionsListEl.innerHTML =
+      '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
+  }
+}
+async function loadMyStats() {
+  if (!myStatsEl || !authToken) return;
+
+  myStatsEl.innerHTML =
+    '<p class="small subtle">Veriler yükleniyor...</p>';
+
+  try {
+    // Kendi tahminlerimizi çekiyoruz
+    const data = await api.get('/api/predictions/mine', authToken);
+    const items = data.items || data.data || [];
+
+    if (!items.length) {
+      myStatsEl.innerHTML =
+        '<p class="small subtle">Henüz tahmin yapmadığın için istatistik yok.</p>';
+      return;
+    }
+
+    const total = items.length;
+    const pending = items.filter((p) => p.status === 'pending').length;
+    const correct = items.filter((p) => p.status === 'correct').length;
+    const incorrect = items.filter((p) => p.status === 'incorrect').length;
+
+    const opened = items.filter((p) => !p.isLocked).length;
+    const locked = total - opened;
+
+    const successRate = total ? Math.round((correct / total) * 100) : 0;
+
+    // Kategorilere göre dağılım
+    const byCategory = {};
+    items.forEach((p) => {
+      const key = p.category || 'Diğer';
+      byCategory[key] = (byCategory[key] || 0) + 1;
+    });
+
+    // Kategorileri en çoktan en aza sırala
+    const categoryEntries = Object.entries(byCategory).sort(
+      (a, b) => b[1] - a[1]
+    );
+
+    const categoryHtml = categoryEntries
+      .map(([name, count]) => {
+        const percent = Math.round((count / total) * 100);
+        return `
+          <div class="stat-bar-row">
+            <div class="stat-row">
+              <span>${escapeHtml(name)}</span>
+              <span>${count} (${percent}%)</span>
+            </div>
+            <div class="stat-bar-track">
+              <div class="stat-bar-fill" style="width: ${percent}%;"></div>
+            </div>
           </div>
         `;
-        myPredictionsListEl.appendChild(div);
-      });
-    } catch (err) {
-      console.error('My predictions error:', err);
-      myPredictionsListEl.innerHTML = '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
-    }
+      })
+      .join('');
+
+    myStatsEl.innerHTML = `
+      <div class="stat-card">
+        <h3>Genel durum</h3>
+        <div class="stat-row">
+          <span>Toplam tahmin</span>
+          <strong>${total}</strong>
+        </div>
+        <div class="stat-row">
+          <span>Doğru</span>
+          <strong>${correct}</strong>
+        </div>
+        <div class="stat-row">
+          <span>Yanlış</span>
+          <strong>${incorrect}</strong>
+        </div>
+        <div class="stat-row">
+          <span>Bekleyen</span>
+          <strong>${pending}</strong>
+        </div>
+        <div class="stat-row">
+          <span>Başarı oranı</span>
+          <strong>${successRate}%</strong>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <h3>Kilit durumu</h3>
+        <div class="stat-row">
+          <span>Açılmış tahminler</span>
+          <strong>${opened}</strong>
+        </div>
+        <div class="stat-row">
+          <span>Kilitli tahminler</span>
+          <strong>${locked}</strong>
+        </div>
+        <div class="stat-bar-track" style="margin-top:6px;">
+          <div
+            class="stat-bar-fill"
+            style="width: ${
+              total ? Math.round((opened / total) * 100) : 0
+            }%;"
+          ></div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <h3>Kategorilere göre dağılım</h3>
+        ${categoryHtml}
+      </div>
+    `;
+  } catch (err) {
+    console.error('loadMyStats error:', err);
+    myStatsEl.innerHTML =
+      '<p class="small">İstatistikler yüklenirken bir hata oluştu.</p>';
   }
+}
+
 
 // Benim istatistiklerim kartı
 async function loadMyStats() {
@@ -463,88 +710,297 @@ async function loadMyStats() {
   }
 }
 
+async function loadLeaderboard() {
+  if (!leaderboardBodyEl || !authToken) return;
 
-  async function loadPredictionDetail(predictionId) {
-    if (!predictionDetailEl) return;
+  leaderboardBodyEl.innerHTML =
+    '<p class="small subtle">Liderlik tablosu yükleniyor...</p>';
 
-    if (!authToken) {
-      resetDetailPanel();
+  try {
+    const params = new URLSearchParams();
+    if (leaderboardCategoryEl && leaderboardCategoryEl.value) {
+      params.set('category', leaderboardCategoryEl.value);
+    }
+    if (leaderboardMinResolvedEl && leaderboardMinResolvedEl.value) {
+      params.set('minResolved', String(leaderboardMinResolvedEl.value));
+    }
+
+    const qs = params.toString();
+    const url = qs ? `/api/leaderboard?${qs}` : '/api/leaderboard';
+
+    const data = await api.get(url, authToken);
+    const items = data.data || data || [];
+
+    if (!items.length) {
+      leaderboardBodyEl.innerHTML =
+        '<p class="small subtle">Bu kriterlerle eşleşen kullanıcı yok.</p>';
       return;
     }
-    if (!predictionId) {
-      resetDetailPanel();
-      return;
-    }
 
-    try {
-      const data = await api.get(`/api/predictions/${predictionId}`, authToken);
+    let html = `
+      <table class="leaderboard-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Kullanıcı</th>
+            <th>Çözülen</th>
+            <th>Doğru</th>
+            <th>Başarı</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
 
-      const statusLabel =
-        data.status === 'correct' ? 'Doğru' :
-        data.status === 'incorrect' ? 'Yanlış' : 'Bekliyor';
-
-      const ownerName = escapeHtml(data.user?.username || 'Bilinmiyor');
-      const cat = escapeHtml(data.category || '');
-      const tDate = fmtDate(data.targetDate);
-      const created = fmtDate(data.createdAt);
-
-      const title = data.isLocked ? 'Mühürlü tahmin' : escapeHtml(data.title || '(Başlık yok)');
-      const contentHtml = data.isLocked
-        ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-        : escapeHtml(data.content || '').replace(/\n/g, '<br/>');
-
-      predictionDetailEl.innerHTML = `
-        <div class="feed-item">
-          <div class="feed-header">
-            <span class="feed-user">${ownerName}</span>
-            <span class="feed-category">${cat}</span>
-            <span class="feed-date">${tDate}</span>
-          </div>
-          <div class="feed-content">
-            <strong>${title}</strong>
-            <div>${contentHtml}</div>
-          </div>
-          <div class="feed-footer">
-            Durum: ${statusLabel} ${created ? `· Oluşturma: ${created}` : ''}
-          </div>
-        </div>
+    items.forEach((row, index) => {
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(row.username || '')}</td>
+          <td style="text-align:right;">${row.resolvedCount || 0}</td>
+          <td style="text-align:right;">${row.correctCount || 0}</td>
+          <td style="text-align:right;">${row.accuracy ?? 0}%</td>
+        </tr>
       `;
-    } catch (err) {
-      console.error('Prediction detail error:', err);
-      predictionDetailEl.innerHTML = '<p class="small">Detay yüklenirken bir hata oluştu.</p>';
-    }
+    });
+
+    html += `
+        </tbody>
+      </table>
+    `;
+
+    leaderboardBodyEl.innerHTML = html;
+  } catch (err) {
+    console.error('loadLeaderboard error:', err);
+    leaderboardBodyEl.innerHTML =
+      '<p class="small">Liderlik tablosu yüklenirken bir hata oluştu.</p>';
   }
-  // Takip ettiklerim listesini yükler
+}
+  if (leaderboardRefreshBtn) {
+    leaderboardRefreshBtn.addEventListener('click', () => {
+      loadLeaderboard();
+    });
+  }
+
+async function loadCommentsForPrediction(predictionId) {
+  if (!commentsListEl) return;
+
+  if (!authToken || !predictionId) {
+    commentsListEl.innerHTML =
+      '<p class="small">Bu tahmine henüz yorum yapılmamış.</p>';
+    currentComments = [];
+    return;
+  }
+
+  try {
+    const data = await api.get(
+      `/api/predictions/${predictionId}/comments`,
+      authToken
+    );
+    const items = data.items || [];
+    currentComments = items;
+
+    if (!items.length) {
+      commentsListEl.innerHTML =
+        '<p class="small">Bu tahmine henüz yorum yapılmamış.</p>';
+      return;
+    }
+
+    const html = items
+      .map((c) => {
+        const userName = escapeHtml(c.user?.username || 'Bilinmiyor');
+        const created = fmtDate(c.createdAt);
+        const content = escapeHtml(c.content || '').replace(/\n/g, '<br/>');
+
+        const cu = currentUser;
+        const commentUserId =
+          (c.user && (c.user.id || c.user.userId || c.user._id)) || null;
+        const currentUserId =
+          (cu && (cu.id || cu.userId || cu._id)) || null;
+
+        const isMine =
+          !!(commentUserId && currentUserId && commentUserId === currentUserId);
+        const alreadyPromoted = !!c.childPredictionId;
+
+        const promoteButton =
+          isMine && !alreadyPromoted
+            ? `<button class="comment-promote-btn" data-comment-id="${c.id}">Bu yorumdan tahmin oluştur</button>`
+            : '';
+
+        const badge = alreadyPromoted
+          ? `<span class="comment-badge">Tahmine dönüştürüldü</span>`
+          : '';
+
+        return `
+          <div class="comment-item">
+            <div class="comment-header">
+              <span class="comment-user">${userName}</span>
+              ${created ? `<span class="comment-date">${created}</span>` : ''}
+            </div>
+            <div class="comment-content">${content}</div>
+            <div class="comment-footer">
+              ${badge}
+              ${promoteButton}
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    commentsListEl.innerHTML = html;
+
+    const buttons = commentsListEl.querySelectorAll('.comment-promote-btn');
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-comment-id');
+        const comment = currentComments.find((c) => c.id === id);
+        if (!comment) return;
+        prefillPredictionFormFromComment(comment);
+      });
+    });
+  } catch (err) {
+    console.error('loadCommentsForPrediction error:', err);
+    commentsListEl.innerHTML =
+      '<p class="small">Yorumlar yüklenirken bir hata oluştu.</p>';
+    currentComments = [];
+  }
+}
+
+
+
+async function loadPredictionDetail(predictionId) {
+  if (!predictionDetailEl) return;
+
+  // Hangi tahminin seçili olduğunu globalde tut
+  selectedPredictionId = predictionId;
+
+  if (!authToken) {
+    resetDetailPanel();
+    return;
+  }
+  if (!predictionId) {
+    resetDetailPanel();
+    return;
+  }
+
+  try {
+    const data = await api.get(`/api/predictions/${predictionId}`, authToken);
+
+    const statusLabel =
+      data.status === 'correct'
+        ? 'Doğru'
+        : data.status === 'incorrect'
+        ? 'Yanlış'
+        : 'Bekliyor';
+
+    const ownerName = escapeHtml(data.user?.username || 'Bilinmiyor');
+    const cat = escapeHtml(data.category || '');
+    const tDate = fmtDate(data.targetDate);
+    const created = fmtDate(data.createdAt);
+
+    const title = data.isLocked
+      ? 'Mühürlü tahmin'
+      : escapeHtml(data.title || '(Başlık yok)');
+    const contentHtml = data.isLocked
+      ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
+      : escapeHtml(data.content || '').replace(/\n/g, '<br/>');
+
+    const likesCount = data.likesCount ?? 0;
+    const liked = !!data.liked;
+
+    predictionDetailEl.innerHTML = `
+      <div class="feed-item" data-id="${data.id}">
+        <div class="feed-header">
+          <span class="feed-user">${ownerName}</span>
+          <span class="feed-category">${cat}</span>
+          <span class="feed-date">${tDate}</span>
+        </div>
+        <div class="feed-content">
+          <strong>${title}</strong>
+          <div>${contentHtml}</div>
+        </div>
+        <div class="feed-footer">
+          <span>Durum: ${statusLabel} ${created ? `· Oluşturma: ${created}` : ''}</span>
+          <button
+            type="button"
+            class="like-pill ${liked ? 'liked' : ''}"
+            data-id="${data.id}"
+          >
+            <span class="like-icon">👍</span>
+            <span class="like-count">${likesCount}</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    // 4.5'in yaptığı iş tam olarak burası:
+    // Detay geldiği anda ilgili tahminin yorumlarını da yükle
+    if (typeof loadCommentsForPrediction === 'function') {
+      await loadCommentsForPrediction(predictionId);
+    }
+  } catch (err) {
+    console.error('Prediction detail error:', err);
+    predictionDetailEl.innerHTML =
+      '<p class="small">Detay yüklenirken bir hata oluştu.</p>';
+
+    if (commentsListEl) {
+      commentsListEl.innerHTML =
+        '<p class="small">Yorumlar yüklenemedi.</p>';
+    }
+    selectedPredictionId = null;
+  }
+}
+
+
+
+
+// Takip ettiklerim listesini yükler
   async function loadFollowing() {
   if (!followingListEl || !authToken) return;
+
   try {
     const data = await api.get('/api/follow/following', authToken);
-    const items = data.data || [];
+
+    // Backend: { userId, username, count, following: [...] }
+    const items = data.following || data.data || [];
+
     if (!items.length) {
-      followingListEl.innerHTML = '<p class="small">Henüz kimseyi takip etmiyorsunuz.</p>';
+      followingListEl.innerHTML =
+        '<p class="small subtle">Henüz kimseyi takip etmiyorsunuz.</p>';
       return;
     }
+
     followingListEl.innerHTML = '';
+
     items.forEach((u) => {
       const li = document.createElement('div');
       li.className = 'feed-item';
+
+      // Takip tarihi ya da varsa joinedAt
+      const dateText = u.followedAt || u.joinedAt || '';
+
       li.innerHTML = `
         <div class="feed-header">
-          <button class="user-link" data-user-id="${escapeHtml(u.id)}"
-            style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0">
-            ${escapeHtml(u.username)}
+          <button
+            class="user-link"
+            data-user-id="${escapeHtml(u.id)}"
+            style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0"
+          >
+            ${escapeHtml(u.username || '')}
           </button>
-          <span class="feed-date">${escapeHtml(u.joinedAt || '')}</span>
+          <span class="feed-date">${escapeHtml(dateText || '')}</span>
         </div>
         <div class="small">Takip ediliyor</div>
       `;
+
       followingListEl.appendChild(li);
     });
   } catch (err) {
     console.error('loadFollowing error:', err);
-    followingListEl.innerHTML = '<p class="small">Takip listesi yüklenemedi.</p>';
+    followingListEl.innerHTML =
+      '<p class="small">Takip listesi yüklenemedi.</p>';
   }
 }
+
 
 // Kullanıcı keşfet listesi
 async function loadExploreUsers() {
@@ -611,13 +1067,17 @@ function updateUserInUrl(userId) {
 }
 
 async function loadUserProfile(userId) {
-  if (!authToken) return;
-  try {
-    const prof = await api.get(`/api/users/${encodeURIComponent(userId)}`, authToken);
+    try {
+    const [prof, statsRes] = await Promise.all([
+      api.get(`/api/users/${encodeURIComponent(userId)}`, authToken),
+      api.get(`/api/stats/user/${encodeURIComponent(userId)}`, authToken),
+    ]);
 
     const u = prof.user;
     const stats = prof.stats || {};
     const items = prof.predictions || [];
+    const categoryStats = (statsRes && statsRes.categories) || [];
+
 
     // Profil üst bilgileri
     if (profileDetailsEl) {
@@ -632,6 +1092,48 @@ async function loadUserProfile(userId) {
           · Başarı: ${stats.accuracy || 0}%
         </div>
       `;
+    }
+        if (profileCategoryStatsEl) {
+      if (!categoryStats.length) {
+        profileCategoryStatsEl.innerHTML =
+          '<p class="small subtle">Bu kullanıcı için kategori bazlı istatistik yok.</p>';
+      } else {
+        let html = `
+          <h4 style="margin-top:4px; margin-bottom:4px;">Kategorilere göre performans</h4>
+          <table class="profile-category-table">
+            <thead>
+              <tr>
+                <th>Kategori</th>
+                <th>Toplam</th>
+                <th>Çözülen</th>
+                <th>Doğru</th>
+                <th>Yanlış</th>
+                <th>Başarı</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        categoryStats.forEach((c) => {
+          html += `
+            <tr>
+              <td>${escapeHtml(c.label || c.key || '')}</td>
+              <td style="text-align:right;">${c.total || 0}</td>
+              <td style="text-align:right;">${c.resolved || 0}</td>
+              <td style="text-align:right;">${c.correct || 0}</td>
+              <td style="text-align:right;">${c.incorrect || 0}</td>
+              <td style="text-align:right;">${(c.accuracy ?? 0)}%</td>
+            </tr>
+          `;
+        });
+
+        html += `
+            </tbody>
+          </table>
+        `;
+
+        profileCategoryStatsEl.innerHTML = html;
+      }
     }
 
     // Takip et / bırak butonu
@@ -659,6 +1161,8 @@ async function loadUserProfile(userId) {
         items.forEach((p) => {
           const div = document.createElement('div');
           div.className = 'feed-item';
+          div.dataset.id = p.id;       // detayı açmak için
+          div.style.cursor = 'pointer';
           const title = p.isLocked
             ? 'Mühürlü tahmin'
             : escapeHtml(p.title || '(Başlık yok)');
@@ -730,6 +1234,19 @@ async function loadUserProfile(userId) {
     });
   }
 
+  if (profilePredictionsEl) {
+    profilePredictionsEl.addEventListener('click', (e) => {
+    const item = e.target.closest('.feed-item');
+    if (!item) return;
+
+    const id = item.dataset.id;
+    if (!id) return;
+
+    loadPredictionDetail(id);
+  });
+  }
+
+
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -776,6 +1293,17 @@ async function loadUserProfile(userId) {
     });
   }
 
+  // Detay kartındaki like butonu
+    if (predictionDetailEl) {
+    predictionDetailEl.addEventListener('click', (e) => {
+    const likeBtn = e.target.closest('.like-pill');
+    if (likeBtn) {
+      e.stopPropagation();
+      handleLikeToggle(likeBtn);
+    }
+  });
+}
+
   // =========================
   // 8) TAHMİN OLUŞTURMA
   // =========================
@@ -804,15 +1332,28 @@ async function loadUserProfile(userId) {
         return;
       }
 
-      try {
-        await api.post('/api/predictions', { title, content, targetDate, category }, authToken);
-        if (predictionMessageEl) {
-          predictionMessageEl.textContent = 'Tahmin başarıyla mühürlendi.';
-          predictionMessageEl.className = 'message success';
-        }
-        predictionForm.reset();
-        // liste/ feed güncelle
-        await Promise.all([loadFeed(), loadMyPredictions({})]);
+        try {
+        const body = { title, content, targetDate, category };
+
+          if (activeSourceCommentId) {
+            body.sourceCommentId = activeSourceCommentId;
+          }
+
+          await api.post('/api/predictions', body, authToken);
+
+          // başarı sonrası:
+          predictionForm.reset();
+          activeSourceCommentId = null;
+
+          if (predictionFromCommentHintEl) {
+            predictionFromCommentHintEl.textContent = '';
+          }
+
+          await Promise.all([loadFeed(), loadMyPredictions({})]);
+
+          if (selectedPredictionId) {
+            await loadCommentsForPrediction(selectedPredictionId);
+          }
       } catch (err) {
         if (predictionMessageEl) {
           predictionMessageEl.textContent = err.message || 'Tahmin oluşturulamadı.';
@@ -823,7 +1364,85 @@ async function loadUserProfile(userId) {
   }
 
   // =========================
-  // 9) BENİM TAHMİNLERİM FİLTRELERİ
+
+  // =========================
+  // 9) YORUM FORMU
+  // =========================
+
+  if (commentForm) {
+  commentForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation(); // aynı elemana eklenmiş diğer submit listener'larını da durdurur
+
+    // Aynı anda ikinci kez tetiklenmeyi engelle (çift tıklama vs.)
+    if (commentForm.dataset.submitting === '1') {
+      return;
+    }
+    commentForm.dataset.submitting = '1';
+
+    if (!authToken) {
+      if (commentMessageEl) {
+        commentMessageEl.textContent =
+          'Yorum eklemek için önce giriş yapın.';
+        commentMessageEl.className = 'message error';
+      }
+      commentForm.dataset.submitting = '0';
+      return;
+    }
+
+    if (!selectedPredictionId) {
+      if (commentMessageEl) {
+        commentMessageEl.textContent = 'Önce bir tahmin seçin.';
+        commentMessageEl.className = 'message error';
+      }
+      commentForm.dataset.submitting = '0';
+      return;
+    }
+
+    const content = (commentContentEl?.value || '').trim();
+    if (!content) {
+      if (commentMessageEl) {
+        commentMessageEl.textContent = 'Yorum boş olamaz.';
+        commentMessageEl.className = 'message error';
+      }
+      commentForm.dataset.submitting = '0';
+      return;
+    }
+
+    try {
+      await api.post(
+        `/api/predictions/${encodeURIComponent(selectedPredictionId)}/comments`,
+        { content },
+        authToken
+      );
+
+      if (commentMessageEl) {
+        commentMessageEl.textContent = 'Yorum eklendi.';
+        commentMessageEl.className = 'message success';
+      }
+      if (commentContentEl) {
+        commentContentEl.value = '';
+      }
+
+      await loadCommentsForPrediction(selectedPredictionId);
+    } catch (err) {
+      console.error('comment submit error:', err);
+      if (commentMessageEl) {
+        commentMessageEl.textContent =
+          err.message || 'Yorum eklenirken bir hata oluştu.';
+        commentMessageEl.className = 'message error';
+      }
+    } finally {
+      commentForm.dataset.submitting = '0';
+    }
+  });
+}
+
+
+  // =========================
+  // 10) BENİM TAHMİNLERİM FİLTRELERİ
+
   // =========================
 
   if (myPredictionsFilterCategoryEl) {
@@ -851,12 +1470,18 @@ async function loadUserProfile(userId) {
   }
 
   if (myPredictionsListEl) {
-    myPredictionsListEl.addEventListener('click', (e) => {
-      const item = e.target.closest('.feed-item');
-      if (!item) return;
-      const id = item.dataset.id;
-      if (!id) return;
-      loadPredictionDetail(id);
+  myPredictionsListEl.addEventListener('click', (e) => {
+    const likeBtn = e.target.closest('.like-pill');
+    if (likeBtn) {
+      e.stopPropagation();
+      handleLikeToggle(likeBtn);
+      return;
+    }
+    const item = e.target.closest('.feed-item');
+    if (!item) return;
+    const id = item.dataset.id;
+    if (!id) return;
+    loadPredictionDetail(id);
     });if (profileFollowBtn) {
     profileFollowBtn.addEventListener('click', async () => {
     if (!authToken) return;
@@ -912,21 +1537,36 @@ if (myStatsEl) {
   });
 }
 
-
   if (feedListEl) {
-    feedListEl.addEventListener('click', (e) => {
-    const userLink = e.target.closest('.user-link');
-  if (userLink) {
-    const uid = userLink.dataset.userId;
-    if (uid) {
-      updateUserInUrl(uid);
-      loadUserProfile(uid);
+  feedListEl.addEventListener('click', (e) => {
+    // Önce like butonu mu diye bak
+    const likeBtn = e.target.closest('.like-pill');
+    if (likeBtn) {
+      e.stopPropagation();
+      handleLikeToggle(likeBtn);
+      return;
     }
-    return;
-  }
 
+    // Kullanıcı adına tıklanırsa profil
+    const userLink = e.target.closest('.user-link');
+    if (userLink) {
+      const uid = userLink.dataset.userId;
+      if (uid) {
+        updateUserInUrl(uid);
+        loadUserProfile(uid);
+      }
+      return;
+    }
+
+    // Kartın herhangi bir yerine tıklanırsa detay
+    const item = e.target.closest('.feed-item');
+    if (!item) return;
+    const id = item.dataset.id;
+    if (!id) return;
+    loadPredictionDetail(id);
   });
-  }
+}
+
   if (profileFollowBtn) {
   profileFollowBtn.addEventListener('click', async () => {
     if (!authToken) return;
@@ -1004,7 +1644,7 @@ if (myStatsEl) {
   }
 
   // =========================
-  // 10) DM (opsiyonel / varsa)
+  // 11) DM (opsiyonel / varsa)
   // =========================
 
   if (dmForm && dmMessageInputEl) {
@@ -1025,7 +1665,7 @@ if (myStatsEl) {
   }
 
   // =========================
-  // 11) İLK YÜKLEME
+  // 12) İLK YÜKLEME
   // =========================
 
   (async function boot() {
@@ -1041,6 +1681,7 @@ if (myStatsEl) {
     loadFollowing(),
     loadExploreUsers(),
     loadMyStats(),
+    loadLeaderboard(),
   ]);
 
   // URL'de user parametresi varsa profili otomatik yükle
@@ -1057,3 +1698,25 @@ if (myStatsEl) {
 
   })();
 })();
+// Basit tab navigasyonu
+document.addEventListener('DOMContentLoaded', () => {
+  const tabButtons = document.querySelectorAll('.tab-button');
+  const tabPanels = document.querySelectorAll('.tab-panel');
+
+  if (!tabButtons.length) return;
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-tab');
+
+      tabButtons.forEach((b) => b.classList.remove('is-active'));
+      tabPanels.forEach((panel) => panel.classList.remove('is-active'));
+
+      btn.classList.add('is-active');
+      const panel = document.getElementById(`tab-${target}`);
+      if (panel) {
+        panel.classList.add('is-active');
+      }
+    });
+  });
+});

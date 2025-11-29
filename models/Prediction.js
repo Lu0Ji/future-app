@@ -36,6 +36,18 @@ const predictionSchema = new mongoose.Schema(
     resolvedAt: {
       type: Date,
     },
+        // Beğeniler
+    likedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    likesCount: {
+      type: Number,
+      default: 0,
+    },
+
   },
   {
     timestamps: true, // createdAt, updatedAt otomatik

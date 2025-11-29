@@ -16,6 +16,7 @@ router.get('/', auth, async (req, res) => {
     );
 
     const followedIds = relations.map((rel) => rel.following.toString());
+    
 
     // 2) Kendimizi de feed'e ekleyelim
     if (!followedIds.includes(currentUserId)) {
@@ -42,7 +43,7 @@ router.get('/', auth, async (req, res) => {
     const todayStr = new Date().toISOString().split('T')[0];
 
     // 4) Her tahmini mühür durumuna göre dön
-    const data = predictions.map((p) => {
+      const data = predictions.map((p) => {
       const targetStr = p.targetDate.toISOString().split('T')[0];
       const isLocked = targetStr > todayStr; // gelecekteyse mühürlü
 
@@ -58,6 +59,10 @@ router.get('/', auth, async (req, res) => {
         createdAt: p.createdAt,
         status: p.status || 'pending',
         resolvedAt: p.resolvedAt || null,
+        likesCount: p.likesCount || (p.likedBy || []).length || 0,
+        liked: p.likedBy
+        ? p.likedBy.some((u) => u.toString() === req.user.id.toString())
+        : false,
       };
     });
 

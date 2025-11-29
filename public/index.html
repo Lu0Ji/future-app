@@ -1,211 +1,356 @@
 <!DOCTYPE html>
 <html lang="tr">
-<head>
-  <meta charset="UTF-8" />
-  <title>Guess The Future</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="styles.css" />
+  <head>
+    <meta charset="UTF-8" />
+    <title>FutureCast - Tahmin Sosyal Ağı</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="logo-mark">⏳</div>
+          <div class="logo-text">
+            <span class="logo-title">FutureCast</span>
+            <span class="logo-sub">Zaman kapsülü tahminler</span>
+          </div>
+        </div>
+        <div class="topbar-center">
+          <input
+            id="global-search"
+            class="input input-ghost"
+            placeholder="Kullanıcı veya tahmin ara (şimdilik pasif)"
+          />
+        </div>
+        <div class="topbar-right">
+          <div id="user-info" class="current-user-info">
+            Giriş yapmadınız
+          </div>
+          <button id="logout-button" class="btn ghost-btn">Çıkış</button>
+        </div>
+      </header>
 
-</head>
-<body>
-  <div id="app">
-    <header>
-      <div>
-        <h1>Guess The Future</h1>
-        <small>Sealed predictions / mühürlü tahminler</small>
-      </div>
-      <div style="text-align: right;">
-        <div id="user-info">Giriş yapmadınız</div>
-        <button id="logout-btn" type="button" style="display:none;">Çıkış yap</button>
-      </div>
-    </header>
-
-    <main>
-      <!-- Sol taraf: Auth + Tahmin -->
-      <div>
-        <section id="auth-section">
-          <h2>Giriş / Kayıt</h2>
-          <div class="row">
-            <div>
-              <h3>Kayıt ol</h3>
-              <form id="register-form">
+      <main class="layout">
+        <!-- SOL SÜTUN: AUTH + YENİ TAHMİN -->
+        <aside class="sidebar-left">
+          <section class="card auth-card">
+            <h2>Hesabın</h2>
+            <div class="auth-forms">
+              <form id="register-form" class="stack-form">
+                <h3 class="form-title">Kayıt ol</h3>
                 <label for="register-username">Kullanıcı adı</label>
-                <input id="register-username" type="text" autocomplete="off" required />
+                <input
+                  id="register-username"
+                  name="username"
+                  autocomplete="username"
+                  required
+                />
 
                 <label for="register-email">E-posta</label>
-                <input id="register-email" type="email" autocomplete="off" required />
+                <input
+                  id="register-email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  required
+                />
 
                 <label for="register-password">Şifre</label>
-                <input id="register-password" type="password" required />
+                <input
+                  id="register-password"
+                  name="password"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+                />
 
-                <button type="submit">Kayıt ol</button>
+                <button type="submit" class="btn primary-btn">Kayıt ol</button>
               </form>
-            </div>
-            <div>
-              <h3>Giriş yap</h3>
-              <form id="login-form">
-                <label for="login-identifier">Kullanıcı adı veya e-posta</label>
-                <input id="login-identifier" type="text" autocomplete="off" required />
+
+              <form id="login-form" class="stack-form">
+                <h3 class="form-title">Giriş yap</h3>
+                <label for="login-email">E-posta</label>
+                <input
+                  id="login-email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  required
+                />
 
                 <label for="login-password">Şifre</label>
-                <input id="login-password" type="password" required />
+                <input
+                  id="login-password"
+                  name="password"
+                  type="password"
+                  autocomplete="current-password"
+                  required
+                />
 
-                <button type="submit">Giriş yap</button>
+                <button type="submit" class="btn secondary-btn">
+                  Giriş yap
+                </button>
               </form>
             </div>
-          </div>
-          <div id="auth-message" class="message"></div>
-          <p class="small">
-            Not: Şu an sadece backend’i test etmek için basit bir arayüz. İleride tasarımı güzelleştirip ekranları ayıracağız.
-          </p>
-        </section>
 
-        <section id="prediction-section">
-          <h2>Yeni tahmin oluştur</h2>
-          <form id="prediction-form">
-            <label for="prediction-content">Tahmin metni</label>
+            <div id="auth-message" class="message"></div>
+          </section>
+
+          <section class="card new-prediction-card">
+            <h2>Yeni tahmin</h2>
+            <form id="prediction-form" class="stack-form">
               <label for="prediction-title">Başlık</label>
               <input
-                type="text"
                 id="prediction-title"
-                placeholder="Kısa bir başlık / özet yazın..."
+                name="title"
+                placeholder="Kısa bir başlık"
+                required
               />
 
-            <textarea id="prediction-content" required placeholder="Örn: 2026 yılında X şirketinin hissesi %50 artacak..."></textarea>
+              <label for="prediction-content">Tahmin</label>
+              <textarea
+                id="prediction-content"
+                name="content"
+                rows="4"
+                placeholder="Ne olacağını düşünüyorsun?"
+                required
+              ></textarea>
 
-            <div class="row">
-              <div>
-                <label for="prediction-date">Açılma tarihi</label>
-                <input id="prediction-date" type="date" required />
+              <div class="two-col">
+                <div>
+                  <label for="prediction-date">Açılma tarihi</label>
+                  <input
+                    id="prediction-date"
+                    name="targetDate"
+                    type="date"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="prediction-category">Kategori</label>
+                  <select id="prediction-category" name="category" required>
+                    <option value="">Yükleniyor...</option>
+                    <!-- app.js backend'den dolduruyor -->
+                  </select>
+                </div>
               </div>
-              <div>
-                <label for="prediction-category">Kategori</label>
-                <select id="prediction-category" required>
-                  <option value="">Yükleniyor...</option>
-                </select>
-              </div>
-            </div>
 
-            <button type="submit">Tahmini mühürle</button>
-          </form>
-          <div id="prediction-message" class="message"></div>
-          <p class="small">
-            Geçmiş tarihe tahmin yapılamaz. Tahminler hedef tarihe kadar gizli kalır, sadece hedef tarih geldiğinde feed’de görünür.
-          </p>
-        </section>
+              <button type="submit" class="btn primary-btn">
+                Tahmini mühürle
+              </button>
+            </form>
 
-        <section id="profile-section">
-          <h2>Profil</h2>
-          <button id="profile-follow-btn" class="btn" style="margin-top:8px; display:none;">
-          Takip et
-          </button>
-            <div id="profile-details">
-              <p class="small">
-                Bir kullanıcı seçmek için sağ taraftan takip ettiklerinize tıklayın.
+            <div id="prediction-message" class="message"></div>
+            <div id="prediction-from-comment-hint" class="small"></div>
+            <p class="small subtle">
+              Geçmiş tarihe tahmin yapılamaz. Tahminler açılma tarihine kadar
+              senden bile gizli kalır.
+            </p>
+          </section>
+        </aside>
+
+        <!-- ORTA SÜTUN: TABS + FEED/MINE/EXPLORE/STATS -->
+        <section class="content-main">
+          <nav class="tabs">
+            <button
+              class="tab-button is-active"
+              type="button"
+              data-tab="feed"
+            >
+              Akış
+            </button>
+            <button class="tab-button" type="button" data-tab="mine">
+              Tahminlerim
+            </button>
+            <button class="tab-button" type="button" data-tab="explore">
+              Keşfet
+            </button>
+            <button class="tab-button" type="button" data-tab="stats">
+              İstatistik
+            </button>
+          </nav>
+
+          <section id="tab-feed" class="tab-panel is-active">
+            <div class="panel-header">
+              <h2>Akış</h2>
+              <p class="small subtle">
+                Senin ve takip ettiklerinin tahminleri burada görünür.
               </p>
             </div>
-            <button id="profile-follow-btn" class="btn" style="margin-top:8px; display:none;">Takip et</button>
-            <div id="profile-predictions">
-              <p class="small">
+            <div id="feed-list" class="list"></div>
+          </section>
+          
+
+          <section id="tab-mine" class="tab-panel">
+            <div class="panel-header">
+              <h2>Tahminlerim</h2>
+              <p class="small subtle">
+                Kendi mühürlü ve açılmış tahminlerini burada görürsün.
+              </p>
+            </div>
+
+            <div class="filters-row">
+              <div class="filter">
+                <label for="my-predictions-filter-status">Durum</label>
+                <select id="my-predictions-filter-status">
+                  <option value="">Tümü</option>
+                  <option value="pending">Beklemede</option>
+                  <option value="correct">Doğru</option>
+                  <option value="incorrect">Yanlış</option>
+                </select>
+              </div>
+              <div class="filter">
+                <label for="my-predictions-filter-category">Kategori</label>
+                <select id="my-predictions-filter-category">
+                  <option value="">Tümü</option>
+                  <!-- app.js dolduracak -->
+                </select>
+              </div>
+              <div class="filter">
+                <label>&nbsp;</label>
+                <button
+                  id="my-predictions-clear-filters"
+                  type="button"
+                  class="btn ghost-btn"
+                >
+                  Filtreleri temizle
+                </button>
+              </div>
+            </div>
+
+
+            <div id="my-predictions-list" class="list"></div>
+          </section>
+
+          <section id="tab-explore" class="tab-panel">
+            <div class="panel-header">
+              <h2>Keşfet</h2>
+              <p class="small subtle">
+                Yeni kullanıcıları ve ilginç tahminleri keşfet.
+              </p>
+            </div>
+            <div id="explore-users" class="list"></div>
+          </section>
+
+          <section id="tab-stats" class="tab-panel" aria-label="İstatistik">
+            <h2>İstatistik</h2>
+            <p class="subtitle">
+              Kendi tahmin performansını ve kategori bazında dağılımını gör.
+            </p>
+            <div id="my-stats" class="stats-grid">
+              <p class="small subtle">Veriler yükleniyor...</p>
+            </div>
+
+            <div id="leaderboard-card" class="leaderboard-card">
+              <h3>En isabetli tahminciler</h3>
+              <p class="small subtle">
+                Kategori seçerek en yüksek başarı oranına sahip kullanıcıları görebilirsin.
+              </p>
+              <div class="leaderboard-filters">
+                <label class="small">
+                  Kategori:
+                  <select id="leaderboard-category"></select>
+                </label>
+                <label class="small">
+                  Min. çözülen tahmin:
+                  <input
+                    id="leaderboard-min-resolved"
+                    type="number"
+                    value="10"
+                    min="1"
+                    style="width: 60px;"
+                  />
+                </label>
+                <button id="leaderboard-refresh" type="button">
+                  Yenile
+                </button>
+              </div>
+              <div id="leaderboard-body" class="leaderboard-body small">
+                <p class="small subtle">Liderlik tablosu yükleniyor...</p>
+              </div>
+            </div>
+          </section>
+
+        </section>
+
+        <!-- SAĞ SÜTUN: PROFIL + DETAY + YORUMLAR -->
+        <aside class="sidebar-right">
+          <section class="card" id="profile-section">
+            <h2>Profil</h2>
+            <button
+              id="profile-follow-btn"
+              class="btn secondary-btn"
+              style="display: none; margin-bottom: 6px;"
+            >
+              Takip et
+            </button>
+
+            <div id="profile-details" class="profile-header">
+              <p class="small subtle">
+                Bir kullanıcı adına tıkladığında profili burada görünür.
+              </p>
+            </div>
+
+            <div id="profile-category-stats" class="profile-stats small">
+              <p class="small subtle">
+                Kategori bazlı istatistikler burada görünecek.
+              </p>
+            </div>
+
+            <div id="profile-predictions" class="profile-stats list">
+              <p class="small subtle">
                 Bu kullanıcının açılmış tahminleri burada görünecek.
               </p>
             </div>
-        </section>
+
+          </section>
 
 
-        <section id="dm-section">
-          <h2>Mesajlaşma</h2>
-          <div id="dm-selected-user" class="small">
-            Henüz bir kullanıcı seçmediniz. Sağ taraftan "Takip ettiklerim" listesinden birini seçip mesajlaşabilirsiniz.
-          </div>
-          <div id="dm-messages">
-            <p class="small">Mesaj yok.</p>
-          </div>
-          <form id="dm-form">
-            <label for="dm-input">Mesajınız</label>
-            <textarea id="dm-input" placeholder="Bir mesaj yazın..." required></textarea>
-            <button type="submit">Gönder</button>
-          </form>
-          <div id="dm-message-status" class="message"></div>
-        </section>
+          <section class="card" id="following-section">
+            <h2>Takip ettiklerim</h2>
+            <div id="following-list" class="list">
+              <p class="small subtle">Henüz kimseyi takip etmiyorsun.</p>
+            </div>
+          </section>
 
-      </div>
+          <section class="card" id="prediction-detail-section">
+            <h2>Seçili tahmin detayı</h2>
+            <div id="prediction-detail">
+              <p class="small">
+                Bir tahmine tıklayarak detayını burada görebilirsiniz.
+              </p>
+            </div>
 
-      <!-- Sağ taraf: Feed -->
-            <!-- Sağ taraf: Feed + Benim tahminlerim -->
-            <!-- Sağ taraf: Feed + Takip ettiklerim + Benim tahminlerim -->
-      <div>
-        <section id="feed-section">
-          <h2>Feed (takip ettiklerin + sen)</h2>
-          <div id="feed-list">
-            <p class="small">Henüz veri yok. Giriş yapıp tahmin oluşturduktan sonra burada görünecek.</p>
-          </div>
-        </section>
+            <div id="prediction-comments">
+              <h3>Yorumlar</h3>
+              <div id="comments-list">
+                <p class="small">Bu tahmine henüz yorum yapılmamış.</p>
+              </div>
 
-        <section id="following-section">
-          <h2>Takip ettiklerim</h2>
-          <div id="following-list">
-            <p class="small">Henüz kimseyi takip etmiyorsunuz.</p>
-          </div>
-        </section>
+              <!-- form'a stack-form class'ı ekledik -->
+              <form id="comment-form" class="stack-form">
+                <label for="comment-content">Yorum yaz</label>
+                <textarea
+                  id="comment-content"
+                  rows="3"
+                  placeholder="Bu tahmin hakkında fikrini yaz..."
+                  required
+                ></textarea>
+                <button type="submit" class="btn secondary-btn">
+                  Yorum ekle
+                </button>
+              </form>
 
-        <section id="my-predictions-section">
-          <h2>Benim tahminlerim</h2>
-          <div id="my-predictions-filters" class="filters-row">
-            <select id="my-predictions-filter-category">
-              <option value="">Tüm kategoriler</option>
-              <!-- JS ile dolduracağız -->
-        </select>
-        <section class="card">
-          <h3>Benim istatistiklerim</h3>
-          <div id="my-stats" class="small">
-            Henüz yüklenmedi.
-          </div>
-        </section>
+              <div id="comment-message" class="message"></div>
+            </div>
+          </section>
 
-        <select id="my-predictions-filter-status">
-              <option value="">Tüm durumlar</option>
-              <option value="pending">Bekliyor</option>
-              <option value="correct">Doğru</option>
-              <option value="incorrect">Yanlış</option>
-        </select>
+        </aside>
+      </main>
+    </div>
 
-            <button id="my-predictions-clear-filters" type="button">
-              Temizle
-            </button>
-          </div>
-
-          <div id="my-predictions-list">
-            <p class="small">Henüz tahmininiz yok.</p>
-          </div>
-        </section>
-
-        <section id="prediction-detail-section">
-          <h2>Seçili tahmin detayı</h2>
-          <div id="prediction-detail">
-            <p class="small">
-              Bir tahmine tıklayarak detayını burada görebilirsiniz.
-            </p>
-          </div>
-        </section>
-
-      </div>
-
-
-    </main>
-    <!-- ============ TAKIP ETTIKLERIM ============ -->
-    <section class="card" id="following-card">
-      <h3>Takip ettiklerim</h3>
-      <div id="following-list" class="list"></div>
-    </section>
-
-    <section class="card">
-    <h3>Kullanıcılar</h3>
-    <div id="explore-users" class="list"></div>
-    </section>
-
-  </div>
-
-  <script src="app.js"></script>
-</body>
+    <script src="app.js"></script>
+  </body>
 </html>

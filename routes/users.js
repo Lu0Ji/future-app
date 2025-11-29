@@ -85,6 +85,7 @@ router.get('/:id', auth, async (req, res) => {
       const targetStr = p.targetDate ? p.targetDate.toISOString().split('T')[0] : '';
       const createdStr = p.createdAt ? p.createdAt.toISOString().split('T')[0] : '';
       const isLocked = new Date(targetStr) > new Date(todayStr); // güvence
+      
 
       return {
         id: String(p._id),
@@ -92,9 +93,9 @@ router.get('/:id', auth, async (req, res) => {
         targetDate: targetStr,
         createdAt: createdStr,
         status: p.status || 'pending',
-        title: isSelf ? p.title || '' : isLocked ? '' : p.title || '',
-        // içerik: kendi profilinde her zaman bulunur (UI isterse gizler), başkasında sadece açılmışsa
-        content: isSelf ? p.content || '' : isLocked ? '' : p.content || '',
+        title: isLocked ? null : (p.title || null),
+        // içerik: hedef tarih gelene kadar KİMSE (sahibi dahil) göremez
+        content: isLocked ? null : p.content,
         isLocked,
       };
     });

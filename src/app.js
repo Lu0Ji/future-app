@@ -34,6 +34,7 @@ app.use('/api/follow', require('../routes/follow'));
 app.use('/api/feed', require('../routes/feed'));
 app.use('/api/messages', require('../routes/messages'));
 app.use('/api/users', require('../routes/users'));
+app.use('/api/leaderboard', require('../routes/leaderboard'));
 
 
 // Basit health check
