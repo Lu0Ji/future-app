@@ -42,13 +42,18 @@ router.get('/explore', auth, async (req, res) => {
 });
 
 
-// GET /api/users/:id  -> Profil verisi + görülmesi serbest tahminler
+// GET /api/users/:id  -> Profil verisi + son tahminler
 router.get('/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = await User.findById(id).select('username email createdAt').lean();
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    const user = await User.findById(id)
+      .select('username email createdAt')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     const isSelf = String(req.user.id) === String(user._id);
 
@@ -58,34 +63,46 @@ router.get('/:id', auth, async (req, res) => {
       following: id,
     });
 
-    // İstatistikler
+    // Genel istatistikler
     const [total, correct, incorrect, resolved] = await Promise.all([
       Prediction.countDocuments({ user: id }),
       Prediction.countDocuments({ user: id, status: 'correct' }),
       Prediction.countDocuments({ user: id, status: 'incorrect' }),
-      Prediction.countDocuments({ user: id, status: { $in: ['correct', 'incorrect'] } }),
+      Prediction.countDocuments({
+        user: id,
+        status: { $in: ['correct', 'incorrect'] },
+      }),
     ]);
-    const accuracy = resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
 
-    // Tahminler (kısıt)
-    // Artık profil sayfasında mühürlü tahminler de listelenecek.
-    // Kilit bilgisini isLocked üzerinden döndürüyoruz, içerik tarafını oradan kontrol ediyoruz.
+    const accuracy =
+      resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
+
+    // Tahminler
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const query = { user: id };
-    // NOT: targetDate filtresi yok; hem açılmış hem mühürlü tahminler gelecek.
-
-
-    const preds = await Prediction.find(query)
+    const preds = await Prediction.find({ user: id })
       .sort({ createdAt: -1 })
       .limit(30)
       .lean();
 
     const data = preds.map((p) => {
-      const targetStr = p.targetDate ? p.targetDate.toISOString().split('T')[0] : '';
-      const createdStr = p.createdAt ? p.createdAt.toISOString().split('T')[0] : '';
-      const isLocked = new Date(targetStr) > new Date(todayStr); // güvence
-      
+      const targetStr = p.targetDate
+        ? p.targetDate.toISOString().split('T')[0]
+        : '';
+      const createdStr = p.createdAt
+        ? p.createdAt.toISOString().split('T')[0]
+        : '';
+
+      // Hedef tarihi bugünden büyükse mühürlü kabul et
+      const isLocked =
+        targetStr && new Date(targetStr) > new Date(todayStr);
+
+      const likesCount = p.likesCount || 0;
+      const liked =
+        Array.isArray(p.likedBy) &&
+        p.likedBy.some(
+          (uid) => String(uid) === String(req.user.id)
+        );
 
       return {
         id: String(p._id),
@@ -93,18 +110,24 @@ router.get('/:id', auth, async (req, res) => {
         targetDate: targetStr,
         createdAt: createdStr,
         status: p.status || 'pending',
-        // Mühürlü tahminlerin başlığı görülebilir; içerik mühür çözülene kadar gizli
+        // Başlık: her zaman gönder, UI isterse gösterir
         title: p.title || '',
-        content: isLocked ? null : (p.content || ''),
+        // İçerik: mühürlü ise null, açılmışsa içerik
+        content: isLocked ? null : p.content || '',
         isLocked,
+        likesCount,
+        liked,
       };
     });
 
-    res.json({
+    return res.json({
       user: {
         id: String(user._id),
         username: user.username,
-        joinedAt: user.createdAt?.toISOString().split('T')[0] || '',
+        joinedAt:
+          (user.createdAt &&
+            user.createdAt.toISOString().split('T')[0]) ||
+          '',
       },
       isSelf,
       isFollowing: !!isFollowing,
@@ -113,7 +136,7 @@ router.get('/:id', auth, async (req, res) => {
     });
   } catch (err) {
     console.error('User profile error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
