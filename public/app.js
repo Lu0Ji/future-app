@@ -703,83 +703,99 @@ async function loadMyStats() {
 }
 
 
-// Benim istatistiklerim kartı
-async function loadMyStats() {
-  if (!myStatsEl || !authToken) return;
+  // Benim istatistiklerim kartı
+  async function loadMyStats() {
+    if (!myStatsEl || !authToken) return;
 
-  try {
-    const data = await api.get('/api/stats/me', authToken);
-    const categories = data.categories || [];
-
-    if (!categories.length) {
-      myStatsEl.innerHTML = '<p class="small">Henüz istatistik yok. Tahmin yaptıkça burada belirecek.</p>';
-      return;
-    }
-
-    // Toplamlar
-    let total = 0;
-    let resolved = 0;
-    let correct = 0;
-    let incorrect = 0;
-
-    categories.forEach((c) => {
-      total += c.total || 0;
-      resolved += c.resolved || 0;
-      correct += c.correct || 0;
-      incorrect += c.incorrect || 0;
-    });
-
-    const accuracy = resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
-
-    // HTML tablo
-    let html = '';
-    html += `<div class="small" style="margin-bottom:8px;">
-      Kullanıcı: <strong>${escapeHtml(data.username || '')}</strong><br/>
-      Toplam tahmin: <strong>${total}</strong>,
-      Çözülen: <strong>${resolved}</strong>,
-      Doğru: <strong>${correct}</strong>,
-      Yanlış: <strong>${incorrect}</strong>,
-      Başarı: <strong>${accuracy}%</strong>
-    </div>`;
-
-    html += `<table class="small" style="width:100%; border-collapse:collapse; font-size:12px;">
-      <thead>
-        <tr>
-          <th style="text-align:left; padding:4px 0;">Kategori</th>
-          <th style="text-align:right; padding:4px 0;">Toplam</th>
-          <th style="text-align:right; padding:4px 0;">Çözülen</th>
-          <th style="text-align:right; padding:4px 0;">Doğru</th>
-          <th style="text-align:right; padding:4px 0;">Yanlış</th>
-          <th style="text-align:right; padding:4px 0;">Başarı</th>
-        </tr>
-      </thead>
-      <tbody>
-    `;
-
-    categories.forEach((c) => {
-      html += `
-        <tr data-category-key="${escapeHtml(c.key || '')}" class="my-stats-row" style="cursor:pointer;">
-          <td style="padding:2px 0;">
-            <span style="text-decoration:underline;">${escapeHtml(c.label || c.key || '')}</span>
-          </td>
-          <td style="text-align:right;">${c.total || 0}</td>
-          <td style="text-align:right;">${c.resolved || 0}</td>
-          <td style="text-align:right;">${c.correct || 0}</td>
-          <td style="text-align:right;">${c.incorrect || 0}</td>
-          <td style="text-align:right;">${c.accuracy || 0}%</td>
-        </tr>
-      `;
-    });
-
-    html += '</tbody></table>';
-
-    myStatsEl.innerHTML = html;
-  } catch (err) {
-    console.error('loadMyStats error:', err);
     myStatsEl.innerHTML =
-      '<p class="small">İstatistikler yüklenemedi.</p>';
+      '<p class="small subtle">İstatistikler yükleniyor...</p>';
+
+    try {
+      const data = await api.get('/api/stats/me', authToken);
+
+      const total = data.total || 0;
+      const resolved = data.resolved || 0;
+      const correct = data.correct || 0;
+      const incorrect = data.incorrect || 0;
+      const accuracy =
+        data.accuracy !== undefined && data.accuracy !== null
+          ? data.accuracy
+          : 0;
+      const categories = data.categories || [];
+
+      let html = `
+        <div class="stats-overview">
+          <div class="stat-card stat-card-primary">
+            <div class="stat-label">Toplam tahmin</div>
+            <div class="stat-value">${total}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Çözülen</div>
+            <div class="stat-value">${resolved}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Doğru</div>
+            <div class="stat-value">${correct}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Başarı oranı</div>
+            <div class="stat-value">%${accuracy}</div>
+          </div>
+        </div>
+      `;
+
+      if (categories.length) {
+        html += `
+          <div class="stats-categories">
+            <h3 class="small-heading">Kategorilere göre performans</h3>
+            <table class="stats-category-table">
+              <thead>
+                <tr>
+                  <th>Kategori</th>
+                  <th>Toplam</th>
+                  <th>Çözülen</th>
+                  <th>Doğru</th>
+                  <th>Yanlış</th>
+                  <th>Başarı</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        categories.forEach((c) => {
+          html += `
+            <tr>
+              <td>${escapeHtml(c.label || c.key || '')}</td>
+              <td>${c.total || 0}</td>
+              <td>${c.resolved || 0}</td>
+              <td>${c.correct || 0}</td>
+              <td>${c.incorrect || 0}</td>
+              <td>%${c.accuracy ?? 0}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        html += `
+          <p class="small subtle">
+            Henüz istatistik oluşacak kadar tahmin yok.
+          </p>
+        `;
+      }
+
+      myStatsEl.innerHTML = html;
+    } catch (err) {
+      console.error('loadMyStats error:', err);
+      myStatsEl.innerHTML =
+        '<p class="small">İstatistikler yüklenirken bir hata oluştu.</p>';
+    }
   }
-}
+
 
 async function loadLeaderboard() {
   if (!leaderboardBodyEl || !authToken) return;
@@ -1195,15 +1211,29 @@ function updateUserInUrl(userId) {
 
 async function loadUserProfile(userId) {
     try {
-    const [prof, statsRes] = await Promise.all([
-      api.get(`/api/users/${encodeURIComponent(userId)}`, authToken),
-      api.get(`/api/stats/user/${encodeURIComponent(userId)}`, authToken),
-    ]);
+        // Önce profil bilgisini al
+    const prof = await api.get(
+      `/api/users/${encodeURIComponent(userId)}`,
+      authToken
+    );
 
     const u = prof.user;
     const stats = prof.stats || {};
     const items = prof.predictions || [];
-    const categoryStats = (statsRes && statsRes.categories) || [];
+
+    // Kategori bazlı istatistikler: ayrı try-catch, hata olsa bile profili göster.
+    let categoryStats = [];
+    try {
+      const statsRes = await api.get(
+        `/api/stats/user/${encodeURIComponent(userId)}`,
+        authToken
+      );
+      categoryStats = (statsRes && statsRes.categories) || [];
+    } catch (err) {
+      console.error('loadUserProfile stats error:', err);
+      // Hata durumunda sadece istatistikler boş kalır, profil yine görünür
+      categoryStats = [];
+    }
 
 
     // Profil üst bilgileri
@@ -1278,46 +1308,87 @@ async function loadUserProfile(userId) {
       }
     }
 
-    // Tahmin listesi
+        // Tahmin listesi
     if (profilePredictionsEl) {
       if (!items.length) {
         profilePredictionsEl.innerHTML =
-          '<p class="small">Bu kullanıcının görünür tahmini yok.</p>';
+          '<p class="small subtle">Bu kullanıcının henüz tahmini yok.</p>';
       } else {
         profilePredictionsEl.innerHTML = '';
         items.forEach((p) => {
           const div = document.createElement('div');
           div.className = 'feed-item';
-          div.dataset.id = p.id;       // detayı açmak için
+          div.dataset.id = p.id; // detayı açmak için
           div.style.cursor = 'pointer';
-          const title = escapeHtml(
-           p.title || (p.isLocked ? 'Mühürlü tahmin' : '(Başlık yok)')
-         );
-          const content = p.isLocked
-            ? '<span class="small">İçerik hedef tarih gelene kadar gizli.</span>'
-            : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
-          const status =
-            p.status === 'correct'
+
+          const cat = escapeHtml(p.category || '');
+          const tDate = fmtDate(p.targetDate);
+          const created = fmtDate(p.createdAt);
+
+          const rawStatus = p.status || 'pending';
+          const statusLabel =
+            rawStatus === 'correct'
               ? 'Doğru'
-              : p.status === 'incorrect'
+              : rawStatus === 'incorrect'
               ? 'Yanlış'
-              : 'Bekliyor';
+              : 'Beklemede';
+
+          const statusClass =
+            rawStatus === 'correct'
+              ? 'status-correct'
+              : rawStatus === 'incorrect'
+              ? 'status-incorrect'
+              : 'status-pending';
+
+          const isLocked = !!p.isLocked;
+          const titleText = escapeHtml(
+            p.title || (isLocked ? 'Mühürlü tahmin' : '(Başlık yok)')
+          );
+          const contentHtml = isLocked
+            ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
+            : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
+
+          const metaText = created
+            ? `Oluşturma: ${created} · Açılma: ${tDate}`
+            : `Açılma: ${tDate}`;
+
+          const likesCount = p.likesCount ?? 0;
+          const liked = !!p.liked;
 
           div.innerHTML = `
             <div class="feed-header">
-              <span class="feed-category">${escapeHtml(p.category || '')}</span>
-              <span class="feed-date">${escapeHtml(p.targetDate || '')}</span>
+              <span class="feed-category">${cat}</span>
+              <span class="feed-date">${tDate}</span>
             </div>
             <div class="feed-content">
-              <strong>${title}</strong>
-              <div>${content}</div>
+              <strong>${isLocked ? '🔒 ' : ''}${titleText}</strong>
+              <div>${contentHtml}</div>
             </div>
-            <div class="feed-footer">Durum: ${status}</div>
+            <div class="feed-footer">
+              <span class="small subtle">
+                ${metaText}
+              </span>
+              <div class="feed-footer-right">
+                <span class="prediction-status-pill ${statusClass}">
+                  ${statusLabel}
+                </span>
+                <button
+                  type="button"
+                  class="like-pill ${liked ? 'liked' : ''}"
+                  data-id="${p.id}"
+                >
+                  <span class="like-icon">👍</span>
+                  <span class="like-count">${likesCount}</span>
+                </button>
+              </div>
+            </div>
           `;
+
           profilePredictionsEl.appendChild(div);
         });
       }
     }
+
   } catch (err) {
     console.error('loadUserProfile error:', err);
     if (profileDetailsEl) {

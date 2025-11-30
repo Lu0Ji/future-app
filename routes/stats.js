@@ -6,18 +6,19 @@ const User = require('../models/User');
 const categories = require('../config/categories');
 const mongoose = require('mongoose');
 
-// GET /api/stats/me -> login olan kullanıcının kategori bazlı istatistikleri
+// GET /api/stats/me -> giriş yapmış kullanıcının genel ve kategori bazlı istatistikleri
 router.get('/me', auth, async (req, res) => {
   try {
-    // BU KULLANICININ TÜM TAHMİNLERİ
-    const predictions = await Prediction.find({ user: req.user.id });
+    const userId = (req.user && req.user.id) || req.userId;
 
-    // Debug için istersen şunları bir kere görebilirsin:
-    // console.log('Stats for user:', req.user.id);
-    // console.log('Found predictions:', predictions.length);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
+    const predictions = await Prediction.find({ user: userId }).lean();
+
+    // Kategori bazlı istatistikler için başlangıç değerleri
     const statsByCategory = {};
-
     categories.forEach((cat) => {
       statsByCategory[cat.key] = {
         key: cat.key,
@@ -30,15 +31,29 @@ router.get('/me', auth, async (req, res) => {
       };
     });
 
-    predictions.forEach((p) => {
-      const key = p.category;
-      if (!statsByCategory[key]) return; // listede olmayan kategori ise atla
+    let total = 0;
+    let resolved = 0;
+    let correct = 0;
+    let incorrect = 0;
 
+    predictions.forEach((p) => {
+      const status = p.status || 'pending';
+      total += 1;
+
+      if (status === 'correct' || status === 'incorrect') {
+        resolved += 1;
+        if (status === 'correct') {
+          correct += 1;
+        } else {
+          incorrect += 1;
+        }
+      }
+
+      const key = p.category;
       const catStats = statsByCategory[key];
+      if (!catStats) return;
 
       catStats.total += 1;
-
-      const status = p.status || 'pending';
 
       if (status === 'correct' || status === 'incorrect') {
         catStats.resolved += 1;
@@ -50,26 +65,29 @@ router.get('/me', auth, async (req, res) => {
       }
     });
 
-    Object.values(statsByCategory).forEach((catStats) => {
-      if (catStats.resolved > 0) {
-        catStats.accuracy = Math.round(
-          (catStats.correct / catStats.resolved) * 100
-        );
-      } else {
-        catStats.accuracy = 0;
+    Object.values(statsByCategory).forEach((c) => {
+      if (c.resolved > 0) {
+        c.accuracy = Math.round((c.correct / c.resolved) * 100);
       }
     });
 
+    const accuracy =
+      resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
+
     return res.json({
-      userId: req.user.id,
-      username: req.user.username,
+      total,
+      resolved,
+      correct,
+      incorrect,
+      accuracy,
       categories: Object.values(statsByCategory),
     });
   } catch (error) {
-    console.error('Stats error:', error);
+    console.error('Stats /me error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
 
 // Belirli bir kullanıcı için kategori bazlı istatistik
 router.get('/user/:id', auth, async (req, res) => {
@@ -125,10 +143,10 @@ router.get('/user/:id', auth, async (req, res) => {
 // GET /api/stats/user/:id -> belirli bir kullanıcının kategori bazlı istatistikleri
 router.get('/user/:id', auth, async (req, res) => {
   try {
-    const userId = req.params.id;
+      const userId = req.params.id;
 
-    // Kullanıcı var mı diye hafif bir kontrol (zorunlu değil ama güzel)
-    const userDoc = await User.findById(userId).select('username').lean();
+    // Kullanıcı dokümanını ayrıca sorgulamaya gerek yok; username zaten /api/users/:id ile geliyor
+    // const userDoc = await User.findById(userId).select('username').lean();
 
     // Bu kullanıcının tüm tahminleri
     const predictions = await Prediction.find({ user: userId });
@@ -181,7 +199,6 @@ router.get('/user/:id', auth, async (req, res) => {
 
     return res.json({
       userId,
-      username: userDoc ? userDoc.username : '',
       categories: Object.values(statsByCategory),
     });
   } catch (error) {
