@@ -7,47 +7,87 @@ const predictionSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // Yeni alan: kısa başlık / özet
+
+    // Kısa başlık / özet
     title: {
       type: String,
-      required: true,
       trim: true,
       maxlength: 150,
+      default: '',
     },
-    // Eski alan: tahmin metni
+
+
+    // Tahmin metni
     content: {
       type: String,
       required: true,
       trim: true,
     },
+
+    // Kategori (config/categories içindeki key'lerden biri)
     category: {
       type: String,
       required: true,
     },
+
+    // Hedef tarih (tahminin açılacağı tarih)
     targetDate: {
       type: Date,
       required: true,
     },
+
+    // Çözüm durumu
     status: {
       type: String,
       enum: ['pending', 'correct', 'incorrect'],
       default: 'pending',
     },
+
+    // Ne zaman çözüldü (topluluk oyu veya ileride AI ile)
     resolvedAt: {
       type: Date,
+      default: null,
     },
-        // Beğeniler
+
+    // Beğeniler
     likedBy: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
       },
     ],
+
     likesCount: {
       type: Number,
       default: 0,
     },
 
+    // Topluluk çözüm oylamaları
+    resolutionVotes: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        vote: {
+          type: String,
+          enum: ['correct', 'incorrect'],
+          required: true,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
+    // Çözüm yöntemi: şimdilik sadece 'crowd', ileride 'ai' vs ekleriz
+    resolutionMethod: {
+      type: String,
+      enum: ['none', 'crowd'],
+      default: 'none',
+    },
   },
   {
     timestamps: true, // createdAt, updatedAt otomatik

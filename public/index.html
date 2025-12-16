@@ -31,6 +31,24 @@
         </div>
       </header>
 
+      <nav class="primary-nav">
+        <button class="nav-link nav-link-active" type="button" data-page="page-home">
+          Ana sayfa
+        </button>
+        <button class="nav-link" type="button" data-page="page-profile">
+          Profil
+        </button>
+        <button class="nav-link" type="button" data-page="page-messages">
+          Mesajlar
+        </button>
+        <button class="nav-link" type="button" data-page="page-settings">
+          Ayarlar
+        </button>
+      </nav>
+
+      <!-- SAYFA: ANA SAYFA (mevcut layout) -->
+      <div class="app-page app-page-active" id="page-home">
+
       <main class="layout">
         <!-- SOL SÜTUN: AUTH + YENİ TAHMİN -->
         <aside class="sidebar-left">
@@ -100,7 +118,12 @@
           <section class="card new-prediction-card">
             <h2>Yeni tahmin</h2>
             <form id="prediction-form" class="stack-form" novalidate>
-              <label for="prediction-title">Başlık</label>
+              <label
+                for="prediction-title"
+                data-i18n="prediction.form.title"
+              >
+                Başlık
+              </label>
               <input
                 id="prediction-title"
                 name="title"
@@ -108,7 +131,13 @@
                 required
               />
 
-              <label for="prediction-content">Tahmin</label>
+              <label
+                for="prediction-content"
+                data-i18n="prediction.form.content"
+              >
+                Tahminin
+              </label>
+
               <textarea
                 id="prediction-content"
                 name="content"
@@ -130,14 +159,23 @@
 
                 <div>
                   <label for="prediction-category">Kategori</label>
-                  <select id="prediction-category" name="category" required>
-                    <option value="">Yükleniyor...</option>
-                    <!-- app.js backend'den dolduruyor -->
-                  </select>
+                  <input
+                    id="prediction-category"
+                    name="category"
+                    type="text"
+                    list="prediction-category-list"
+                    placeholder="Örn: Sports, Seçim, Borsa"
+                    required
+                  />
+                  <datalist id="prediction-category-list"></datalist>
                 </div>
               </div>
 
-              <button type="submit" class="btn primary-btn">
+              <button
+                type="submit"
+                class="btn primary-btn"
+                data-i18n="prediction.form.submit"
+              >
                 Tahmini mühürle
               </button>
             </form>
@@ -153,24 +191,41 @@
 
         <!-- ORTA SÜTUN: TABS + FEED/MINE/EXPLORE/STATS -->
         <section class="content-main">
-          <nav class="tabs">
+                    <nav class="tabs">
             <button
               class="tab-button is-active"
               type="button"
               data-tab="feed"
+              data-i18n="nav.feed"
             >
               Akış
             </button>
-            <button class="tab-button" type="button" data-tab="mine">
+            <button
+              class="tab-button"
+              type="button"
+              data-tab="mine"
+              data-i18n="nav.my_predictions"
+            >
               Tahminlerim
             </button>
-            <button class="tab-button" type="button" data-tab="explore">
+            <button
+              class="tab-button"
+              type="button"
+              data-tab="explore"
+              data-i18n="nav.explore"
+            >
               Keşfet
             </button>
-            <button class="tab-button" type="button" data-tab="stats">
+            <button
+              class="tab-button"
+              type="button"
+              data-tab="stats"
+              data-i18n="nav.stats"
+            >
               İstatistik
             </button>
           </nav>
+
 
           <section id="tab-feed" class="tab-panel is-active">
             <div class="panel-header">
@@ -244,6 +299,13 @@
             </div>
 
             <div id="leaderboard-card" class="leaderboard-card">
+              <div class="card stats-card" id="myStrengthsCard">
+                <h3>Güçlü olduğun kategoriler</h3>
+                <p class="small subtle">
+                  En az birkaç kez tahmin yaptığın ve en yüksek başarı oranına sahip olduğun alanlar.
+                </p>
+                <div id="myBestCategories"></div>
+              </div>
               <h3>En isabetli tahminciler</h3>
               <p class="small subtle">
                 Kategori seçerek en yüksek başarı oranına sahip kullanıcıları görebilirsin.
@@ -293,9 +355,9 @@
               </p>
             </div>
 
-            <div id="profile-category-stats" class="profile-stats small">
+            <div id="profile-category-stats" class="profile-category-stats">
               <p class="small subtle">
-                Kategori bazlı istatistikler burada görünecek.
+                Bu kullanıcı için kategori bazlı istatistik yok.
               </p>
             </div>
 
@@ -350,6 +412,105 @@
         </aside>
       </main>
     </div>
+     <!-- SAYFA: PROFİL -->
+      <div class="app-page" id="page-profile">
+        <main class="single-page-main">
+          <section class="card">
+            <h2>Profilim</h2>
+            <p class="small subtle">
+              Burası tam profil sayfası. Sağ sütundaki mini profil kutusundaki bilgileri
+              buraya taşıyacağız ve ekstra istatistikler ekleyeceğiz.
+            </p>
+
+            <div id="profile-page-content">
+              <!-- Profil içeriğini app.js içindeki loadMyProfilePage dolduruyor -->
+            </div>
+          </section>
+        </main>
+      </div>
+
+
+
+      <!-- SAYFA: MESAJLAR -->
+            <!-- SAYFA: MESAJLAR -->
+      <div class="app-page" id="page-messages">
+        <main class="single-page-main">
+          <section class="card">
+            <h2>Mesajlar</h2>
+
+            <div class="messages-layout">
+              <aside class="messages-sidebar">
+                <div class="messages-sidebar-header">Sohbetler</div>
+                <ul id="messages-thread-list" class="messages-thread-list"></ul>
+              </aside>
+
+              <section class="messages-main">
+                <div id="messages-empty-state" class="messages-empty">
+                  Henüz bir sohbet seçmedin. Soldan bir kullanıcıya tıkla veya yeni mesaj başlat.
+                </div>
+
+                <div id="messages-conversation" class="messages-conversation hidden">
+                  <div
+                    id="messages-conversation-header"
+                    class="messages-conversation-header"
+                  >
+                    <!-- Başlık JS ile doldurulacak -->
+                  </div>
+
+                  <div
+                    id="messages-conversation-body"
+                    class="messages-conversation-body"
+                  >
+                    <!-- Mesaj balonları JS ile doldurulacak -->
+                  </div>
+
+                  <form id="messages-send-form" class="messages-send-form">
+                    <input
+                      id="messages-input"
+                      type="text"
+                      autocomplete="off"
+                      placeholder="Mesaj yaz..."
+                    />
+                    <button type="submit">Gönder</button>
+                  </form>
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+
+
+      <!-- SAYFA: AYARLAR -->
+      <div class="app-page" id="page-settings">
+        <main class="single-page-main">
+          <section class="card">
+            <h2>Ayarlar</h2>
+            <p class="small subtle">
+              Gelecekte e-posta, dil, bildirim tercihleri, gizlilik gibi ayarlar burada olacak.
+            </p>
+
+            <form class="stack-form">
+              <label for="settings-language">Dil</label>
+              <select id="settings-language" disabled>
+                <option>Şimdilik üst çubuktaki dilden yönetiliyor</option>
+              </select>
+
+              <label for="settings-theme">Tema</label>
+              <select id="settings-theme" disabled>
+                <option>Karanlık tema (aktif)</option>
+              </select>
+
+              <p class="small subtle">
+                Bu sayfa şu an iskelet durumda. Sonra backend tarafıyla
+                birlikte gerçek ayarları bağlarız.
+              </p>
+            </form>
+          </section>
+        </main>
+      </div>
+
+    </div> <!-- /app-shell -->
 
     <script src="app.js"></script>
   </body>

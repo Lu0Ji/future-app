@@ -2,18 +2,30 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const Prediction = require('../models/Prediction');
+const User = require('../models/User');
 
-// GET /api/leaderboard -> kategori bazlı liderlik tablosu
+// GET /api/leaderboard
+// Örnek: /api/leaderboard?category=sports&minResolved=3
 router.get('/', auth, async (req, res) => {
   try {
-    const category = req.query.category;
-    const minResolved = Number(req.query.minResolved || 10);
+    const { category, minResolved } = req.query;
 
+    // minResolved gelmezse 0 kabul et (herkes listeye girebilsin)
+    let minResolvedNum = 0;
+    if (minResolved !== undefined && minResolved !== '') {
+      const parsed = Number(minResolved);
+      if (!Number.isNaN(parsed) && parsed >= 0) {
+        minResolvedNum = parsed;
+      }
+    }
+
+    // Sadece çözülmüş tahminler (doğru / yanlış)
     const match = {
       status: { $in: ['correct', 'incorrect'] },
     };
 
-    if (category) {
+    // Kategori filtresi (all gelirse hepsini göster)
+    if (category && category !== 'all') {
       match.category = category;
     }
 
@@ -28,65 +40,79 @@ router.get('/', auth, async (req, res) => {
               $cond: [{ $eq: ['$status', 'correct'] }, 1, 0],
             },
           },
-          lastResolvedAt: { $max: '$resolvedAt' },
+        },
+      },
+      {
+        $addFields: {
+          // 0–100 arası yüzde
+          accuracy: {
+            $cond: [
+              { $gt: ['$resolvedCount', 0] },
+              {
+                $round: [
+                  {
+                    $multiply: [
+                      {
+                        $divide: ['$correctCount', '$resolvedCount'],
+                      },
+                      100,
+                    ],
+                  },
+                  0,
+                ],
+              },
+              0,
+            ],
+          },
         },
       },
       {
         $match: {
-          resolvedCount: { $gte: minResolved },
-        },
-      },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'user',
-        },
-      },
-      { $unwind: '$user' },
-      {
-        $project: {
-          _id: 0,
-          userId: '$user._id',
-          username: '$user.username',
-          resolvedCount: 1,
-          correctCount: 1,
-          accuracy: {
-            $cond: [
-              { $gt: ['$resolvedCount', 0] },
-              { $divide: ['$correctCount', '$resolvedCount'] },
-              0,
-            ],
-          },
-          lastResolvedAt: 1,
+          resolvedCount: { $gte: minResolvedNum },
         },
       },
       {
         $sort: {
           accuracy: -1,
           resolvedCount: -1,
-          lastResolvedAt: -1,
         },
       },
-      { $limit: 50 },
+      {
+        $limit: 50,
+      },
     ];
 
-    const results = await Prediction.aggregate(pipeline);
+    const aggResult = await Prediction.aggregate(pipeline);
 
-    const formatted = results.map((r) => ({
-      userId: r.userId,
-      username: r.username,
-      resolvedCount: r.resolvedCount,
-      correctCount: r.correctCount,
-      accuracy: Math.round((r.accuracy || 0) * 100),
-      lastResolvedAt: r.lastResolvedAt,
-    }));
+    // Kullanıcı adlarını çek
+    const userIds = aggResult.map((r) => r._id);
+    const users = await User.find({ _id: { $in: userIds } })
+      .select('_id username')
+      .lean();
 
+    const userMap = new Map();
+    users.forEach((u) => {
+      userMap.set(String(u._id), u);
+    });
+
+    const formatted = aggResult.map((r) => {
+      const user = userMap.get(String(r._id));
+      return {
+        userId: String(r._id),
+        username: user?.username || 'Bilinmiyor',
+        resolvedCount: r.resolvedCount,
+        correctCount: r.correctCount,
+        accuracy: r.accuracy, // % olarak
+      };
+    });
+
+    // 🔴 ÖNEMLİ: Frontend `data.data` bekliyor → o yüzden "data" anahtarıyla dönüyoruz
     return res.json({ data: formatted });
   } catch (error) {
-    console.error('Leaderboard error:', error);
-    return res.status(500).json({ error: 'Internal server error.' });
+    console.error('leaderboard error:', error);
+    return res
+      .status(500)
+      .json({ error: 'Liderlik tablosu alınırken bir hata oluştu.' });
   }
 });
 

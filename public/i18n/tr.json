@@ -1,0 +1,14 @@
+{
+  "nav.feed": "Akış",
+  "nav.my_predictions": "Tahminlerim",
+  "nav.explore": "Keşfet",
+  "nav.stats": "İstatistik",
+
+  "prediction.form.title": "Başlık",
+  "prediction.form.content": "Tahminin",
+  "prediction.form.submit": "Tahmini mühürle",
+  "prediction.form.success": "Tahminin {{date}} tarihine kadar mühürlendi. 🎉",
+
+  "errors.login_required": "Bu işlemi yapmak için giriş yapmalısın.",
+  "errors.date_past": "Açılma tarihi bugünden eski olamaz."
+}

@@ -61,34 +61,6 @@
 }
 
 
-  function prefillPredictionFormFromComment(comment) {
-  if (!predictionTitleEl || !predictionContentEl) return;
-
-  // Başlık boşsa default bir şey ver
-  if (!predictionTitleEl.value) {
-    predictionTitleEl.value = 'Yorumdan üretilen tahmin';
-  }
-
-  predictionContentEl.value = comment.content || '';
-
-  activeSourceCommentId = comment.id;
-
-  if (predictionFromCommentHintEl) {
-    const created = fmtDate(comment.createdAt);
-    predictionFromCommentHintEl.textContent =
-      `Bu tahmin, ${created || 'bu'} tarihli yorumundan oluşturulacak.`;
-  }
-
-  if (predictionMessageEl) {
-    predictionMessageEl.textContent = '';
-    predictionMessageEl.className = 'message';
-  }
-
-  // Kullanıcıyı form alanına odakla (opsiyonel)
-  predictionTitleEl.focus();
-}
-
-
   // Basit fetch helper’ları:
   const api = {
     async get(url, token) {
@@ -135,6 +107,130 @@
       return data;
     },
   };
+    // Tahmin çözümleme oyları için global handler
+  window.handleResolutionVote = async function (e, predictionId, vote) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!authToken) {
+      alert('Oy vermek için giriş yapmalısın.');
+      return;
+    }
+
+    if (!predictionId || !vote) {
+      return;
+    }
+
+    try {
+      const res = await api.post(
+        `/api/predictions/${encodeURIComponent(predictionId)}/vote`,
+        { vote },
+        authToken
+      );
+
+      // Tıklanan butonu ve bulunduğu kartı bul
+      const btn = e.target.closest('.resolution-vote-btn');
+      const container = btn && btn.closest('.resolution-vote-buttons');
+      if (container) {
+        container.remove(); // butonları kaldır
+      }
+
+      // Backend statüyü değiştirdiyse, durum pill'ini güncelle
+          if (res && res.status && btn) {
+      // 1) Karttaki durumu güncelle
+      const card = btn.closest('.feed-item');
+      if (card) {
+        const pill = card.querySelector('.prediction-status-pill');
+        if (pill) {
+          pill.classList.remove(
+            'status-correct',
+            'status-incorrect',
+            'status-pending'
+          );
+
+          let label = 'Beklemede';
+          let cls = 'status-pending';
+
+          if (res.status === 'correct') {
+            label = 'Doğru';
+            cls = 'status-correct';
+          } else if (res.status === 'incorrect') {
+            label = 'Yanlış';
+            cls = 'status-incorrect';
+          }
+
+          pill.textContent = label;
+          pill.classList.add(cls);
+        }
+      }
+
+      // 2) Sağdaki detay paneli bu tahmini gösteriyorsa onu da güncelle
+      if (
+        typeof selectedPredictionId !== 'undefined' &&
+        selectedPredictionId &&
+        String(selectedPredictionId) === String(predictionId) &&
+        predictionDetailEl
+      ) {
+        const detailCard =
+          predictionDetailEl.querySelector('.prediction-detail-card');
+        if (detailCard) {
+          const detailPill =
+            detailCard.querySelector('.prediction-status-pill');
+          if (detailPill) {
+            detailPill.classList.remove(
+              'status-correct',
+              'status-incorrect',
+              'status-pending'
+            );
+
+            let label = 'Beklemede';
+            let cls = 'status-pending';
+
+            if (res.status === 'correct') {
+              label = 'Doğru';
+              cls = 'status-correct';
+            } else if (res.status === 'incorrect') {
+              label = 'Yanlış';
+              cls = 'status-incorrect';
+            }
+
+            detailPill.textContent = label;
+            detailPill.classList.add(cls);
+          }
+
+          // Detay footer'daki açıklama metni
+          const statusTextEl = predictionDetailEl.querySelector(
+            '.prediction-detail-footer .small.subtle'
+          );
+          if (statusTextEl) {
+            const resolvedStr = res.resolvedAt ? fmtDate(res.resolvedAt) : null;
+
+            if (res.status === 'correct') {
+              statusTextEl.innerHTML = resolvedStr
+                ? `Bu tahmin ${resolvedStr} tarihinde <strong>Doğru</strong> olarak işaretlendi.`
+                : 'Bu tahmin <strong>Doğru</strong> olarak işaretlendi.';
+            } else if (res.status === 'incorrect') {
+              statusTextEl.innerHTML = resolvedStr
+                ? `Bu tahmin ${resolvedStr} tarihinde <strong>Yanlış</strong> olarak işaretlendi.`
+                : 'Bu tahmin <strong>Yanlış</strong> olarak işaretlendi.';
+            } else {
+              statusTextEl.textContent =
+                'Bu tahmin şu anda beklemede.';
+            }
+          }
+        }
+      }
+    }
+
+    } catch (err) {
+      console.error('vote error:', err);
+      alert(
+        (err && err.message) ||
+          'Oy verilirken bir hata oluştu.'
+      );
+    }
+  };
+
 
   function prefillPredictionFormFromComment(comment) {
   if (!predictionTitleEl || !predictionContentEl) return;
@@ -172,6 +268,36 @@
   let activeSourceCommentId = null; // Yorumdan tahmin üretirken kullanacağız
   let currentComments = []; // Son yüklenen yorum listesi
 
+    // --- i18n ---
+  const supportedLangs = ['tr', 'en'];
+  let currentLang =
+    localStorage.getItem('lang') ||
+    (navigator.language.startsWith('tr') ? 'tr' : 'en');
+
+  if (!supportedLangs.includes(currentLang)) {
+    currentLang = 'en';
+  }
+
+  let translations = {};
+
+  async function loadTranslations(lang) {
+    try {
+      const res = await fetch(`/i18n/${lang}.json`);
+      translations = await res.json();
+      currentLang = lang;
+      localStorage.setItem('lang', lang);
+      applyTranslationsToDom(); // HTML üzerindeki textleri güncelle
+    } catch (e) {
+      console.error('i18n load error', e);
+    }
+  }
+
+  function t(key, vars = {}) {
+    const raw = translations[key] || key;
+    return raw.replace(/\{\{(\w+)\}\}/g, (_, name) => {
+      return vars[name] ?? '';
+    });
+  }
 
 
   // =========================
@@ -191,6 +317,7 @@
   const predictionContentEl = document.getElementById('prediction-content');
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
+  const categoryDatalistEl = document.getElementById('prediction-category-list');
   const predictionMessageEl = document.getElementById('prediction-message');
   const predictionFromCommentHintEl = document.getElementById('prediction-from-comment-hint');
   const predictionSubmitBtn =
@@ -215,6 +342,12 @@
   const leaderboardMinResolvedEl = document.getElementById('leaderboard-min-resolved');
   const leaderboardRefreshBtn = document.getElementById('leaderboard-refresh');
   const leaderboardBodyEl = document.getElementById('leaderboard-body');
+  const myStrengthsCardEl = document.getElementById('myStrengthsCard');
+  const myBestCategoriesEl = document.getElementById('myBestCategories');
+
+
+  // Dil seçici
+  const langSelectEl = document.getElementById('lang-select');
 
 
   // Detay paneli
@@ -232,6 +365,7 @@
   const profileDetailsEl = document.getElementById('profile-details');
   const profileCategoryStatsEl = document.getElementById('profile-category-stats');
   const profilePredictionsEl = document.getElementById('profile-predictions');
+  const profilePageContentEl = document.getElementById('profile-page-content');
   const followingListEl = document.getElementById('following-list');
   const exploreUsersEl = document.getElementById('explore-users');
   const dmSelectedUserEl = document.getElementById('dm-selected-user');
@@ -244,6 +378,15 @@
   profileFollowBtn.dataset.userId = '';
   profileFollowBtn.dataset.following = '';
   }
+    // Mesajlar sayfası
+  const messagesThreadListEl = document.getElementById('messages-thread-list');
+  const messagesConversationEl = document.getElementById('messages-conversation');
+  const messagesEmptyStateEl = document.getElementById('messages-empty-state');
+  const messagesConversationHeaderEl = document.getElementById('messages-conversation-header');
+  const messagesConversationBodyEl = document.getElementById('messages-conversation-body');
+  const messagesSendFormEl = document.getElementById('messages-send-form');
+  const messagesInputEl = document.getElementById('messages-input');
+
 
 
   // =========================
@@ -308,16 +451,16 @@
       const data = await api.get('/api/categories');
       const categories = data.data || data || [];
 
-      // Tahmin formundaki select
-      if (categorySelectEl) {
-        categorySelectEl.innerHTML = '';
+      // Tahmin formu: datalist (yazılabilir kategori + öneri)
+      if (categoryDatalistEl) {
+        categoryDatalistEl.innerHTML = '';
         categories.forEach((c) => {
           const opt = document.createElement('option');
-          opt.value = c.key;
-          opt.textContent = c.label;
-          categorySelectEl.appendChild(opt);
+          opt.value = c.key; // sabitlerde key; custom'da zaten key=label
+          categoryDatalistEl.appendChild(opt);
         });
       }
+
 
       // Benim tahminlerim filtresi
       if (myPredictionsFilterCategoryEl) {
@@ -384,24 +527,75 @@
     feedListEl.innerHTML = '';
 
     items.forEach((p) => {
+      // ID hangi isimle gelirse gelsin yakala
+      const predictionId = p.id || p._id || p.predictionId;
+
       const div = document.createElement('div');
       div.className = 'feed-item';
-      div.dataset.id = p.id;
+      if (predictionId) {
+        div.dataset.id = predictionId;
+      }
       div.style.cursor = 'pointer';
 
       const userName = escapeHtml(p.user?.username || 'Bilinmiyor');
       const cat = escapeHtml(p.category || '');
       const tDate = fmtDate(p.targetDate);
       const created = fmtDate(p.createdAt);
-      const title = p.isLocked
-        ? 'Mühürlü tahmin'
-        : escapeHtml(p.title || '(Başlık yok)');
-      const contentHtml = p.isLocked
+
+      const rawStatus = p.status || 'pending';
+      const statusLabel =
+        rawStatus === 'correct'
+          ? 'Doğru'
+          : rawStatus === 'incorrect'
+          ? 'Yanlış'
+          : 'Beklemede';
+
+      const statusClass =
+        rawStatus === 'correct'
+          ? 'status-correct'
+          : rawStatus === 'incorrect'
+          ? 'status-incorrect'
+          : 'status-pending';
+
+      const isLocked = !!p.isLocked;
+
+      const title = escapeHtml(p.title || '(Başlık yok)');
+
+      const contentHtml = isLocked
         ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
         : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
 
       const likesCount = p.likesCount ?? 0;
       const liked = !!p.liked;
+
+      // Hedef tarih gelmiş ve hâlâ pending ise oy verilebilir
+      const canVote = !isLocked && rawStatus === 'pending';
+
+      const voteButtonsHtml =
+        canVote && predictionId
+          ? `
+        <div class="resolution-vote-buttons">
+          <button
+            type="button"
+            class="resolution-vote-btn"
+            onclick="window.handleResolutionVote(event, '${predictionId}', 'correct')"
+          >
+            Doğru
+          </button>
+          <button
+            type="button"
+            class="resolution-vote-btn"
+            onclick="window.handleResolutionVote(event, '${predictionId}', 'incorrect')"
+          >
+            Yanlış
+          </button>
+        </div>
+      `
+          : '';
+
+      const metaText = created
+        ? `Oluşturma: ${created} · Açılma: ${tDate}`
+        : `Açılma: ${tDate}`;
 
       div.innerHTML = `
         <div class="feed-header">
@@ -421,16 +615,22 @@
         </div>
         <div class="feed-footer">
           <span class="small subtle">
-            ${created ? `Oluşturma: ${created}` : ''}
+            ${metaText}
           </span>
-          <button
-            type="button"
-            class="like-pill ${liked ? 'liked' : ''}"
-            data-id="${p.id}"
-          >
-            <span class="like-icon">👍</span>
-            <span class="like-count">${likesCount}</span>
-          </button>
+          <div class="feed-footer-right">
+            ${voteButtonsHtml}
+            <span class="prediction-status-pill ${statusClass}">
+              ${statusLabel}
+            </span>
+            <button
+              type="button"
+              class="like-pill ${liked ? 'liked' : ''}"
+              data-id="${predictionId || ''}"
+            >
+              <span class="like-icon">👍</span>
+              <span class="like-count">${likesCount}</span>
+            </button>
+          </div>
         </div>
       `;
 
@@ -442,7 +642,6 @@
       '<p class="small">Akış yüklenirken bir hata oluştu.</p>';
   }
 }
-
 
 
   // =========================
@@ -536,10 +735,10 @@
           : 'status-pending';
 
       const isLocked = !!p.isLocked;
+      const canVote = !isLocked && rawStatus === 'pending';
 
-      const titleText = isLocked
-        ? 'Mühürlü tahmin'
-        : escapeHtml(p.title || '(Başlık yok)');
+      const titleText = escapeHtml(p.title || '(Başlık yok)');
+
       const contentHtml = isLocked
         ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
         : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
@@ -550,6 +749,28 @@
       const metaText = created
         ? `Oluşturma: ${created} · Açılma: ${tDate}`
         : `Açılma: ${tDate}`;
+
+      const voteButtonsHtml = canVote
+        ? `
+        <div class="resolution-vote-buttons">
+          <button
+            type="button"
+            class="resolution-vote-btn"
+            onclick="window.handleResolutionVote(event, '${p.id}', 'correct')"
+          >
+            Doğru
+          </button>
+          <button
+            type="button"
+            class="resolution-vote-btn"
+            onclick="window.handleResolutionVote(event, '${p.id}', 'incorrect')"
+          >
+            Yanlış
+          </button>
+        </div>
+      `
+        : '';
+
 
       div.innerHTML = `
         <div class="feed-header">
@@ -565,22 +786,24 @@
             ${metaText}
           </span>
           <div class="feed-footer-right">
-            <span class="prediction-status-pill ${statusClass}">
-              ${statusLabel}
-            </span>
-            <button
-              type="button"
-              class="like-pill ${liked ? 'liked' : ''}"
-              data-id="${p.id}"
-            >
-              <span class="like-icon">👍</span>
-              <span class="like-count">${likesCount}</span>
-            </button>
+              ${voteButtonsHtml}
+              <span class="prediction-status-pill ${statusClass}">
+                ${statusLabel}
+              </span>
+              <button
+                type="button"
+                class="like-pill ${liked ? 'liked' : ''}"
+                data-id="${p.id}"
+              >
+                <span class="like-icon">👍</span>
+                <span class="like-count">${likesCount}</span>
+              </button>
           </div>
         </div>
       `;
 
       myPredictionsListEl.appendChild(div);
+    
     });
   } catch (err) {
     console.error('loadMyPredictions error:', err);
@@ -588,120 +811,6 @@
       '<p class="small">Tahminler yüklenirken bir hata oluştu.</p>';
   }
 }
-
-async function loadMyStats() {
-  if (!myStatsEl || !authToken) return;
-
-  myStatsEl.innerHTML =
-    '<p class="small subtle">Veriler yükleniyor...</p>';
-
-  try {
-    // Kendi tahminlerimizi çekiyoruz
-    const data = await api.get('/api/predictions/mine', authToken);
-    const items = data.items || data.data || [];
-
-    if (!items.length) {
-      myStatsEl.innerHTML =
-        '<p class="small subtle">Henüz tahmin yapmadığın için istatistik yok.</p>';
-      return;
-    }
-
-    const total = items.length;
-    const pending = items.filter((p) => p.status === 'pending').length;
-    const correct = items.filter((p) => p.status === 'correct').length;
-    const incorrect = items.filter((p) => p.status === 'incorrect').length;
-
-    const opened = items.filter((p) => !p.isLocked).length;
-    const locked = total - opened;
-
-    const successRate = total ? Math.round((correct / total) * 100) : 0;
-
-    // Kategorilere göre dağılım
-    const byCategory = {};
-    items.forEach((p) => {
-      const key = p.category || 'Diğer';
-      byCategory[key] = (byCategory[key] || 0) + 1;
-    });
-
-    // Kategorileri en çoktan en aza sırala
-    const categoryEntries = Object.entries(byCategory).sort(
-      (a, b) => b[1] - a[1]
-    );
-
-    const categoryHtml = categoryEntries
-      .map(([name, count]) => {
-        const percent = Math.round((count / total) * 100);
-        return `
-          <div class="stat-bar-row">
-            <div class="stat-row">
-              <span>${escapeHtml(name)}</span>
-              <span>${count} (${percent}%)</span>
-            </div>
-            <div class="stat-bar-track">
-              <div class="stat-bar-fill" style="width: ${percent}%;"></div>
-            </div>
-          </div>
-        `;
-      })
-      .join('');
-
-    myStatsEl.innerHTML = `
-      <div class="stat-card">
-        <h3>Genel durum</h3>
-        <div class="stat-row">
-          <span>Toplam tahmin</span>
-          <strong>${total}</strong>
-        </div>
-        <div class="stat-row">
-          <span>Doğru</span>
-          <strong>${correct}</strong>
-        </div>
-        <div class="stat-row">
-          <span>Yanlış</span>
-          <strong>${incorrect}</strong>
-        </div>
-        <div class="stat-row">
-          <span>Bekleyen</span>
-          <strong>${pending}</strong>
-        </div>
-        <div class="stat-row">
-          <span>Başarı oranı</span>
-          <strong>${successRate}%</strong>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <h3>Kilit durumu</h3>
-        <div class="stat-row">
-          <span>Açılmış tahminler</span>
-          <strong>${opened}</strong>
-        </div>
-        <div class="stat-row">
-          <span>Kilitli tahminler</span>
-          <strong>${locked}</strong>
-        </div>
-        <div class="stat-bar-track" style="margin-top:6px;">
-          <div
-            class="stat-bar-fill"
-            style="width: ${
-              total ? Math.round((opened / total) * 100) : 0
-            }%;"
-          ></div>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <h3>Kategorilere göre dağılım</h3>
-        ${categoryHtml}
-      </div>
-    `;
-  } catch (err) {
-    console.error('loadMyStats error:', err);
-    myStatsEl.innerHTML =
-      '<p class="small">İstatistikler yüklenirken bir hata oluştu.</p>';
-  }
-}
-
 
   // Benim istatistiklerim kartı
   async function loadMyStats() {
@@ -775,6 +884,66 @@ async function loadMyStats() {
           `;
         });
 
+            // --- Güçlü olduğun kategoriler kartı ---
+    if (myStrengthsCardEl && myBestCategoriesEl) {
+      const MIN_RESOLVED_FOR_STRENGTH = 3;
+
+      const eligible = categories
+        .map((c) => {
+          const label = c.label || c.name || c.category || 'Genel';
+          const resolved =
+            c.resolved ??
+            c.resolvedCount ??
+            c.solved ??
+            c.totalResolved ??
+            0;
+          const correct =
+            c.correct ??
+            c.correctCount ??
+            c.trueCount ??
+            0;
+
+          const accuracy =
+            c.accuracy ??
+            (resolved > 0
+              ? Math.round((correct / resolved) * 100)
+              : 0);
+
+          return { label, resolved, accuracy };
+        })
+        // Yeterince verisi olmayanları ele
+        .filter((c) => c.resolved >= MIN_RESOLVED_FOR_STRENGTH)
+        // Önce başarıya, sonra çözülen sayısına göre sırala
+        .sort((a, b) => {
+          if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
+          return b.resolved - a.resolved;
+        })
+        .slice(0, 3); // en iyi 3 kategori
+
+      if (!eligible.length) {
+        myBestCategoriesEl.innerHTML =
+          '<p class="small subtle">Güçlü kategorilerini görebilmek için en az birkaç tahminin çözülmüş olması gerekiyor.</p>';
+      } else {
+        myBestCategoriesEl.innerHTML = `
+          <ul class="best-categories-list">
+            ${eligible
+              .map(
+                (c) => `
+              <li>
+                <span class="cat-label">${escapeHtml(c.label)}</span>
+                <span class="cat-meta">
+                  Çözülen: ${c.resolved} · Başarı: ${c.accuracy}%
+                </span>
+              </li>
+            `
+              )
+              .join('')}
+          </ul>
+        `;
+      }
+    }
+
+
         html += `
               </tbody>
             </table>
@@ -824,7 +993,40 @@ async function loadLeaderboard() {
       return;
     }
 
-    let html = `
+        // Giriş yapmış kullanıcı için kısa özet (sıra, başarı, çözülen)
+    let summaryHtml = '';
+    if (currentUser) {
+      const myIndex = items.findIndex(
+        (row) =>
+          row.userId &&
+          String(row.userId) === String(currentUser.id)
+      );
+
+      if (myIndex !== -1) {
+        const rank = myIndex + 1;
+        const meRow = items[myIndex];
+        const resolved = meRow.resolvedCount || 0;
+        const acc = meRow.accuracy ?? 0;
+
+        summaryHtml = `
+          <div class="leaderboard-summary">
+            Sen şu anda <strong>${rank}.</strong> sıradasın
+            · Çözülen: <strong>${resolved}</strong>
+            · Başarı: <strong>${acc}%</strong>
+          </div>
+        `;
+      } else {
+        summaryHtml = `
+          <div class="leaderboard-summary">
+            Henüz liderlik tablosunda yer almıyorsun.
+            Daha fazla tahmin yap ve açılan tahminlerde doğru sayını artır!
+          </div>
+        `;
+      }
+    }
+
+
+        let html = `
       <table class="leaderboard-table">
         <thead>
           <tr>
@@ -833,29 +1035,81 @@ async function loadLeaderboard() {
             <th>Çözülen</th>
             <th>Doğru</th>
             <th>Başarı</th>
+            <th>Rozet</th>
           </tr>
         </thead>
         <tbody>
     `;
 
-    items.forEach((row, index) => {
+      items.forEach((row, index) => {
+      const rank = index + 1;
+
+      // İlk 3 için madalya, diğerleri için numara
+      let rankDisplay = String(rank);
+      if (rank === 1) rankDisplay = '🥇';
+      else if (rank === 2) rankDisplay = '🥈';
+      else if (rank === 3) rankDisplay = '🥉';
+
+      const resolved = row.resolvedCount || 0;
+      const accuracy = row.accuracy ?? 0;
+
+      // Rozet mantığı
+      let badge = 'Yeni';
+      if (resolved >= 30 && accuracy >= 80) {
+        badge = 'Usta tahminci';
+      } else if (resolved >= 15 && accuracy >= 65) {
+        badge = 'Güçlü tahminci';
+      } else if (resolved >= 5) {
+        badge = 'Yükselen';
+      }
+
+      // Satır sınıfları: hem "ben" hem top3 olabilir
+      const classNames = [];
+
+      if (
+        currentUser &&
+        row.userId &&
+        String(row.userId) === String(currentUser.id)
+      ) {
+        classNames.push('is-me');
+      }
+      if (rank === 1) classNames.push('top-1');
+      else if (rank === 2) classNames.push('top-2');
+      else if (rank === 3) classNames.push('top-3');
+
+      const rowClassAttr = classNames.length
+        ? ` class="${classNames.join(' ')}"`
+        : '';
+
       html += `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(row.username || '')}</td>
-          <td style="text-align:right;">${row.resolvedCount || 0}</td>
+        <tr${rowClassAttr}>
+          <td title="Sıra: ${rank}">${rankDisplay}</td>
+          <td>
+            <button
+              type="button"
+              class="user-link leaderboard-user-link"
+              data-user-id="${escapeHtml(row.userId || '')}"
+              style="background:none;border:none;color:#8ab4f8;cursor:pointer;padding:0"
+            >
+              ${escapeHtml(row.username || '')}
+            </button>
+          </td>
+          <td style="text-align:right;">${resolved}</td>
           <td style="text-align:right;">${row.correctCount || 0}</td>
-          <td style="text-align:right;">${row.accuracy ?? 0}%</td>
+          <td style="text-align:right;">${accuracy}%</td>
+          <td style="text-align:right;">${badge}</td>
         </tr>
       `;
     });
+
 
     html += `
         </tbody>
       </table>
     `;
 
-    leaderboardBodyEl.innerHTML = html;
+    // Özet + tabloyu birlikte bas
+    leaderboardBodyEl.innerHTML = summaryHtml + html;
   } catch (err) {
     console.error('loadLeaderboard error:', err);
     leaderboardBodyEl.innerHTML =
@@ -1007,9 +1261,8 @@ async function loadPredictionDetail(predictionId) {
 
     const isLocked = !!data.isLocked;
 
-    const titleText = isLocked
-      ? 'Mühürlü tahmin'
-      : escapeHtml(data.title || '(Başlık yok)');
+    const titleText = escapeHtml(data.title || '(Başlık yok)');
+
 
     const bodyHtml = isLocked
       ? '<p class="prediction-lock-note small">İçerik hedef tarih gelene kadar tamamen gizli.</p>'
@@ -1209,6 +1462,732 @@ function updateUserInUrl(userId) {
   }
 }
 
+  async function renderProfileCategoryStats(userId) {
+    if (!profileCategoryStatsEl || !authToken) return;
+
+    profileCategoryStatsEl.innerHTML =
+      '<p class="small subtle">Kategori istatistikleri yükleniyor...</p>';
+
+    try {
+      const data = await api.get(
+        `/api/stats/user/${encodeURIComponent(userId)}`,
+        authToken
+      );
+      const categories = data.categories || [];
+
+      if (!categories.length) {
+        profileCategoryStatsEl.innerHTML =
+          '<p class="small subtle">Bu kullanıcı için kategori bazlı istatistik yok.</p>';
+        return;
+      }
+
+      // Çözülen tahmini olan kategorileri al
+      const nonEmpty = categories.filter((c) => (c.resolved || 0) > 0);
+
+      // Accuracy'e göre sıralayıp ilk 3'ü al
+      const top = [...nonEmpty]
+        .sort((a, b) => {
+          const accA = a.accuracy ?? 0;
+          const accB = b.accuracy ?? 0;
+          if (accB !== accA) return accB - accA;
+          return (b.resolved || 0) - (a.resolved || 0);
+        })
+        .slice(0, 3);
+
+      let html = '';
+
+      if (top.length) {
+        html += `
+          <h4 class="small-heading">En başarılı kategoriler</h4>
+          <div class="profile-category-highlights">
+        `;
+
+        top.forEach((c) => {
+          const acc = c.accuracy ?? 0;
+          let tierClass = 'tier-5';
+          if (acc >= 85) tierClass = 'tier-1';
+          else if (acc >= 70) tierClass = 'tier-2';
+          else if (acc >= 50) tierClass = 'tier-3';
+          else if (acc >= 25) tierClass = 'tier-4';
+
+          html += `
+            <div class="profile-category-pill ${tierClass}">
+              <span class="profile-category-pill-label">
+                ${escapeHtml(c.label || c.key || '')}
+              </span>
+              <span class="profile-category-pill-value">%${acc}</span>
+            </div>
+          `;
+        });
+
+        html += `</div>`;
+      }
+
+      // Altına tüm kategoriler tablosu
+      html += `
+        <h4 class="small-heading">Tüm kategoriler</h4>
+        <table class="profile-category-table">
+          <thead>
+            <tr>
+              <th>Kategori</th>
+              <th>Toplam</th>
+              <th>Çözülen</th>
+              <th>Doğru</th>
+              <th>Yanlış</th>
+              <th>Başarı</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      categories.forEach((c) => {
+        html += `
+          <tr>
+            <td>${escapeHtml(c.label || c.key || '')}</td>
+            <td>${c.total || 0}</td>
+            <td>${c.resolved || 0}</td>
+            <td>${c.correct || 0}</td>
+            <td>${c.incorrect || 0}</td>
+            <td>%${c.accuracy ?? 0}</td>
+          </tr>
+        `;
+      });
+
+      html += `
+          </tbody>
+        </table>
+      `;
+
+      profileCategoryStatsEl.innerHTML = html;
+    } catch (err) {
+      console.error('renderProfileCategoryStats error:', err);
+      profileCategoryStatsEl.innerHTML =
+        '<p class="small">Kategori istatistikleri yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
+    // PROFİL SAYFASI (kendi profilim)
+  async function loadMyProfilePage() {
+    if (!profilePageContentEl) return;
+
+    if (!authToken) {
+      profilePageContentEl.innerHTML =
+        '<p class="small subtle">Profilini görmek için önce giriş yapman gerekiyor.</p>';
+      return;
+    }
+
+    profilePageContentEl.innerHTML =
+      '<p class="small subtle">Profil yükleniyor...</p>';
+
+    try {
+      // Genel istatistikler
+      const stats = await api.get('/api/stats/me', authToken);
+       // Takip istatistikleri
+      let followingCount = 0;
+      let followersCount = 0;
+      try {
+        const followStats = await api.get('/api/follow/me-stats', authToken);
+        followingCount = followStats.followingCount || 0;
+        followersCount = followStats.followersCount || 0;
+      } catch (err) {
+        console.error('follow stats error:', err);
+      }
+      const total = stats.total || 0;
+      const resolved = stats.resolved || 0;
+      const correct = stats.correct || 0;
+      const incorrect = stats.incorrect || 0;
+      const accuracy =
+        stats.accuracy !== undefined && stats.accuracy !== null
+          ? stats.accuracy
+          : resolved > 0
+          ? Math.round((correct / resolved) * 100)
+          : 0;
+
+      const categories = stats.categories || [];
+
+      // Güçlü kategoriler (en fazla 3 tane)
+      const bestCategories = categories
+        .map((c) => {
+          const label = c.label || c.name || c.category || 'Genel';
+          const resolvedCount =
+            c.resolved ??
+            c.resolvedCount ??
+            c.solved ??
+            c.totalResolved ??
+            c.total ??
+            0;
+          const correctCount =
+            c.correct ??
+            c.correctCount ??
+            c.trueCount ??
+            c.correctTotal ??
+            0;
+
+          const acc =
+            c.accuracy ??
+            (resolvedCount > 0
+              ? Math.round((correctCount / resolvedCount) * 100)
+              : 0);
+
+          return {
+            label,
+            resolved: resolvedCount,
+            accuracy: acc,
+          };
+        })
+        .filter((c) => c.resolved > 0)
+        .sort((a, b) => {
+          if (b.accuracy !== a.accuracy) return b.accuracy - a.accuracy;
+          return b.resolved - a.resolved;
+        })
+        .slice(0, 3);
+
+      // Kendi tahminlerimiz (son 5 tanesini göstereceğiz)
+      const mineRes = await api.get('/api/predictions/mine', authToken);
+      const allMyPreds = mineRes.items || mineRes.data || [];
+      const recentPreds = allMyPreds.slice(0, 5);
+
+      const username =
+        escapeHtml(currentUser?.username || stats.username || 'Profilim');
+      const initials = escapeHtml(
+        (currentUser?.username || stats.username || 'P')
+          .charAt(0)
+          .toUpperCase()
+      );
+
+      // Güçlü kategoriler HTML
+      let bestCatsHtml = '';
+      if (!bestCategories.length) {
+        bestCatsHtml =
+          '<p class="small subtle">Güçlü kategorilerini görebilmek için önce bazı tahminlerinin çözülmüş olması gerekiyor.</p>';
+      } else {
+        bestCatsHtml = `
+          <ul class="best-categories-list">
+            ${bestCategories
+              .map(
+                (c) => `
+              <li>
+                <span class="cat-label">${escapeHtml(c.label)}</span>
+                <span class="cat-meta">
+                  Çözülen: ${c.resolved} · Başarı: ${c.accuracy}%
+                </span>
+              </li>
+            `
+              )
+              .join('')}
+          </ul>
+        `;
+      }
+
+      // Son tahminler HTML
+      let recentHtml = '';
+      if (!recentPreds.length) {
+        recentHtml =
+          '<p class="small subtle">Henüz tahmin yapmadığın için listelenecek kayıt yok.</p>';
+      } else {
+        recentHtml = `
+          <ul class="profile-recent-list">
+            ${recentPreds
+              .map((p) => {
+                const title = p.title || '(Başlık yok)';
+                const cat = p.category || '';
+                const openDate = fmtDate(p.openAt || p.targetDate);
+                const rawStatus = p.status || 'pending';
+
+                const statusLabel =
+                  rawStatus === 'correct'
+                    ? 'Doğru'
+                    : rawStatus === 'incorrect'
+                    ? 'Yanlış'
+                    : 'Beklemede';
+
+                const statusClass =
+                  rawStatus === 'correct'
+                    ? 'status-correct'
+                    : rawStatus === 'incorrect'
+                    ? 'status-incorrect'
+                    : 'status-pending';
+
+                return `
+                  <li>
+                    <div class="profile-recent-title-row">
+                      <span class="profile-recent-title">${escapeHtml(
+                        title
+                      )}</span>
+                      <span class="badge ${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="profile-recent-meta">
+                      ${escapeHtml(cat || '')}${
+                openDate ? ` · Açılış: ${openDate}` : ''
+              }
+                    </div>
+                  </li>
+                `;
+              })
+              .join('')}
+          </ul>
+        `;
+      }
+
+      // Son içerik
+      profilePageContentEl.innerHTML = `
+        <div class="profile-page-grid">
+          <div class="profile-main">
+            <div class="profile-hero">
+              <div class="profile-avatar">${initials}</div>
+              <div>
+                <h2>${username}</h2>
+                <p class="small subtle">
+                  Zaman kapsüllerine şimdiye kadar <strong>${total}</strong> tahmin bıraktın.
+                </p>
+                <p class="small subtle">
+                  Takipçi: <strong>${followersCount}</strong>
+                  · Takip edilen: <strong>${followingCount}</strong>
+                </p>
+              </div>
+            </div>
+
+
+            <div class="profile-stat-cards">
+              <div class="profile-stat-card">
+                <div class="label">Toplam tahmin</div>
+                <div class="value">${total}</div>
+              </div>
+              <div class="profile-stat-card">
+                <div class="label">Çözülen</div>
+                <div class="value">${resolved}</div>
+              </div>
+              <div class="profile-stat-card">
+                <div class="label">Doğru</div>
+                <div class="value">${correct}</div>
+              </div>
+              <div class="profile-stat-card">
+                <div class="label">Başarı</div>
+                <div class="value">${accuracy}%</div>
+              </div>
+            </div>
+
+            <div class="card-inner-block">
+              <h3 class="small-heading">Güçlü olduğun kategoriler</h3>
+              ${bestCatsHtml}
+            </div>
+          </div>
+
+          <div class="profile-side">
+            <div class="card-inner-block">
+              <h3 class="small-heading">Son tahminlerin</h3>
+              ${recentHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      console.error('my profile load error:', err);
+      profilePageContentEl.innerHTML =
+        '<p class="small subtle">Profil bilgileri yüklenirken bir hata oluştu.</p>';
+    }
+  }
+
+  window.futureAppLoadMyProfilePage = loadMyProfilePage;
+
+    // BAŞKA KULLANICININ PROFİLİ
+  async function loadUserProfilePage(username) {
+    if (!profilePageContentEl) return;
+
+    if (!authToken) {
+      profilePageContentEl.innerHTML =
+        '<p class="small subtle">Profil görmek için önce giriş yapman gerekiyor.</p>';
+      return;
+    }
+
+    profilePageContentEl.innerHTML =
+      '<p class="small subtle">Profil yükleniyor...</p>';
+
+    try {
+      // İstatistikler
+      const stats = await api.get(
+        `/api/stats/user/${encodeURIComponent(username)}`,
+        authToken
+      );
+
+      // Takip istatistikleri
+      let followingCount = 0;
+      let followersCount = 0;
+      try {
+        const followStats = await api.get(
+          `/api/follow/user/${encodeURIComponent(username)}/stats`,
+          authToken
+        );
+        followingCount = followStats.followingCount || 0;
+        followersCount = followStats.followersCount || 0;
+      } catch (err) {
+        console.error('user follow stats error:', err);
+      }
+
+      const displayName = stats.username || username;
+      const initials = escapeHtml(displayName.charAt(0).toUpperCase());
+
+      const total = stats.total || 0;
+      const resolved = stats.resolved || stats.solved || 0;
+      const correct = stats.correct || 0;
+      const accuracy = stats.accuracy || stats.successRate || 0;
+
+      profilePageContentEl.innerHTML = `
+        <div class="profile-page-grid">
+          <div class="profile-main">
+            <div class="profile-hero">
+              <div class="profile-avatar">${initials}</div>
+              <div>
+                <h2>${escapeHtml(displayName)}</h2>
+                <p class="small subtle">
+                  Bu kullanıcı zaman kapsüllerine şimdiye kadar
+                  <strong>${total}</strong> tahmin bırakmış.
+                </p>
+                <p class="small subtle">
+                  Takipçi: <strong>${followersCount}</strong>
+                  · Takip edilen: <strong>${followingCount}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div class="profile-stat-cards">
+              <div class="profile-stat-card">
+                <div class="label">Toplam tahmin</div>
+                <div class="value">${total}</div>
+              </div>
+              <div class="profile-stat-card">
+                <div class="label">Çözülen</div>
+                <div class="value">${resolved}</div>
+              </div>
+              <div class="profile-stat-card">
+                <div class="label">Doğru</div>
+                <div class="value">${correct}</div>
+              </div>
+              <div class="profile-stat-card">
+                <div class="label">Başarı</div>
+                <div class="value">${accuracy}%</div>
+              </div>
+            </div>
+
+            <div class="card-inner-block">
+              <h3 class="small-heading">Güçlü kategoriler (yakında)</h3>
+              <p class="small subtle">
+                Bu kullanıcının kategorilere göre performansını burada göstereceğiz.
+              </p>
+            </div>
+          </div>
+
+          <div class="profile-side">
+            <div class="card-inner-block">
+              <h3 class="small-heading">Bu kullanıcının tahminleri</h3>
+              <p class="small subtle">
+                Yakında bu bölümde bu kullanıcının son tahminlerini listeleyeceğiz.
+              </p>
+            </div>
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      console.error('user profile load error:', err);
+      profilePageContentEl.innerHTML =
+        '<p class="small subtle">Profil yüklenirken bir hata oluştu veya kullanıcı bulunamadı.</p>';
+    }
+  }
+
+// TAM EKRAN PROFİL SAYFASI (profilePageContentEl içine render)
+async function loadUserFullPage(userId) {
+  if (!profilePageContentEl) return;
+
+  profilePageContentEl.innerHTML =
+    '<p class="small subtle">Profil yükleniyor...</p>';
+
+  try {
+    // /api/users/:id => { user, stats, predictions, isSelf, isFollowing }
+    const prof = await api.get(`/api/users/${userId}`, authToken);
+
+    // takip istatistikleri (ID ile)
+    const followStats = await api.get(
+      `/api/follow/user/${userId}/stats`,
+      authToken
+    );
+
+    const u = prof.user || {};
+    const s = prof.stats || {};
+
+    const username = u.username || 'Kullanıcı';
+    const initials = (username || '?').charAt(0).toUpperCase();
+
+    // joinedAt string geliyor (YYYY-MM-DD). Boşsa '-' gösterelim.
+    const joinedText = u.joinedAt
+      ? new Date(u.joinedAt).toLocaleDateString('tr-TR')
+      : '-';
+
+    // undefined olmasın diye default 0
+    const total = Number.isFinite(s.total) ? s.total : 0;
+    const resolved = Number.isFinite(s.resolved) ? s.resolved : 0;
+    const correct = Number.isFinite(s.correct) ? s.correct : 0;
+    const accuracy = Number.isFinite(s.accuracy) ? s.accuracy : 0;
+
+    // --- Tahminleri iki gruba ayır: açılmış / açılmamış (mühürlü) ---
+    const preds = Array.isArray(prof.predictions) ? prof.predictions : [];
+    const openedPreds = preds.filter((p) => !p.isLocked);
+    const lockedPreds = preds.filter((p) => p.isLocked);
+
+    // Açılmış tahminler HTML
+    let openedHtml = '';
+    if (!openedPreds.length) {
+      openedHtml =
+        '<p class="small subtle">Bu kullanıcıya ait açılmış tahmin bulunmuyor.</p>';
+    } else {
+      openedHtml = `
+        <ul class="profile-recent-list">
+          ${openedPreds
+            .map((p) => {
+              const title = p.title || '(Başlık yok)';
+              const cat = p.category || '';
+              const openDate = p.targetDate || '';
+              const rawStatus = p.status || 'pending';
+
+              const statusLabel =
+                rawStatus === 'correct'
+                  ? 'Doğru'
+                  : rawStatus === 'incorrect'
+                  ? 'Yanlış'
+                  : 'Beklemede';
+
+              const statusClass =
+                rawStatus === 'correct'
+                  ? 'status-correct'
+                  : rawStatus === 'incorrect'
+                  ? 'status-incorrect'
+                  : 'status-pending';
+
+              return `
+                <li>
+                  <div class="profile-recent-title-row">
+                    <span class="profile-recent-title">${escapeHtml(title)}</span>
+                    <span class="badge ${statusClass}">${statusLabel}</span>
+                  </div>
+                  <div class="profile-recent-meta">
+                    ${escapeHtml(cat)}${openDate ? ` · Açılış: ${escapeHtml(openDate)}` : ''}
+                  </div>
+                </li>
+              `;
+            })
+            .join('')}
+        </ul>
+      `;
+    }
+
+    // Açılmamış (mühürlü) tahminler HTML (SADECE başlık)
+    let lockedHtml = '';
+    if (!lockedPreds.length) {
+      lockedHtml =
+        '<p class="small subtle">Bu kullanıcıya ait açılmamış tahmin bulunmuyor.</p>';
+    } else {
+      lockedHtml = `
+        <ul class="profile-recent-list">
+          ${lockedPreds
+            .map((p) => {
+              const title = p.title || '(Başlık yok)';
+              return `
+                <li>
+                  <div class="profile-recent-title-row">
+                    <span class="profile-recent-title">${escapeHtml(title)}</span>
+                  </div>
+                </li>
+              `;
+            })
+            .join('')}
+        </ul>
+      `;
+    }
+
+    profilePageContentEl.innerHTML = `
+      <div class="profile-full-hero">
+        <div class="profile-full-avatar">${escapeHtml(initials)}</div>
+        <div>
+          <h2>${escapeHtml(username)}</h2>
+          <p class="small subtle">Katılım: ${escapeHtml(joinedText)}</p>
+          <p class="small subtle">
+            Takipçi: <strong>${followStats.followersCount}</strong>
+            · Takip edilen: <strong>${followStats.followingCount}</strong>
+          </p>
+        </div>
+      </div>
+
+      <div class="profile-stats-row">
+        <div class="profile-stat-card"><span>Toplam</span><strong>${total}</strong></div>
+        <div class="profile-stat-card"><span>Çözülen</span><strong>${resolved}</strong></div>
+        <div class="profile-stat-card"><span>Doğru</span><strong>${correct}</strong></div>
+        <div class="profile-stat-card"><span>Başarı</span><strong>${accuracy}%</strong></div>
+      </div>
+
+      <div class="card-inner-block">
+        <h3>Açılmış tahminler</h3>
+        ${openedHtml}
+      </div>
+
+      <div class="card-inner-block">
+        <h3>Henüz açılmamış tahminler</h3>
+        ${lockedHtml}
+      </div>
+
+          `;
+  } catch (err) {
+    console.error('full profile error:', err);
+    profilePageContentEl.innerHTML =
+      '<p class="small subtle">Profil yüklenirken bir hata oluştu veya kullanıcı bulunamadı.</p>';
+  }
+}
+
+// Router için global erişim
+window.loadUserFullPage = loadUserFullPage;
+
+
+  // SPA router dışarıdan çağırabilsin diye global'e açıyoruz
+  window.futureAppLoadOtherProfilePage = loadUserProfilePage;
+
+
+  // --- MESAJLAR SAYFASI (şimdilik demo veriyle) ---
+
+  let demoThreads = [
+    {
+      id: 't1',
+      username: 'yusuf',
+      lastMessage: 'Bu proje çok iyi gidiyor!',
+      messages: [
+        { fromMe: false, text: 'Selam, nasıl gidiyor?', at: '10:01' },
+        { fromMe: true, text: 'Süper gidiyor, FutureCast uçacak 🚀', at: '10:02' },
+      ],
+    },
+    {
+      id: 't2',
+      username: 'veli',
+      lastMessage: 'Yeni tahminlerine baktım.',
+      messages: [
+        { fromMe: false, text: 'Bugün yeni tahminler açtın mı?', at: '09:15' },
+        { fromMe: true, text: 'Evet, özellikle teknoloji kategorisine 😎', at: '09:17' },
+      ],
+    },
+  ];
+
+  let activeThreadId = null;
+
+  function renderMessagesThreadList() {
+    if (!messagesThreadListEl) return;
+
+    if (!demoThreads.length) {
+      messagesThreadListEl.innerHTML =
+        '<li class="messages-thread-item"><span class="messages-thread-preview">Henüz mesaj yok.</span></li>';
+      return;
+    }
+
+    messagesThreadListEl.innerHTML = demoThreads
+      .map((t) => {
+        const initial = escapeHtml(t.username.charAt(0).toUpperCase());
+        const isActive = t.id === activeThreadId;
+        return `
+          <li class="messages-thread-item${isActive ? ' active' : ''}" data-thread-id="${
+            t.id
+          }">
+            <div class="messages-thread-avatar">${initial}</div>
+            <div class="messages-thread-main">
+              <div class="messages-thread-name">${escapeHtml(t.username)}</div>
+              <div class="messages-thread-preview">${escapeHtml(t.lastMessage)}</div>
+            </div>
+          </li>
+        `;
+      })
+      .join('');
+  }
+
+  function renderMessagesConversation(thread) {
+    if (
+      !messagesConversationEl ||
+      !messagesConversationHeaderEl ||
+      !messagesConversationBodyEl ||
+      !messagesEmptyStateEl
+    )
+      return;
+
+    if (!thread) {
+      messagesConversationEl.classList.add('hidden');
+      messagesEmptyStateEl.style.display = 'block';
+      return;
+    }
+
+    messagesEmptyStateEl.style.display = 'none';
+    messagesConversationEl.classList.remove('hidden');
+
+    messagesConversationHeaderEl.textContent = thread.username;
+
+    messagesConversationBodyEl.innerHTML = thread.messages
+      .map((m) => {
+        const cls = m.fromMe ? 'me' : 'them';
+        return `
+          <div class="message-row ${cls}">
+            <div class="message-bubble">
+              ${escapeHtml(m.text)}
+              <div class="message-meta">${m.at || ''}</div>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    messagesConversationBodyEl.scrollTop = messagesConversationBodyEl.scrollHeight;
+  }
+
+  function openDemoThread(threadId) {
+    activeThreadId = threadId;
+    const thread = demoThreads.find((t) => t.id === threadId);
+    renderMessagesThreadList();
+    renderMessagesConversation(thread);
+  }
+
+  async function initMessagesPage() {
+    if (!messagesThreadListEl) return;
+
+    renderMessagesThreadList();
+    renderMessagesConversation(null);
+
+    // tıklama ile sohbet açma
+    messagesThreadListEl.addEventListener('click', (e) => {
+      const li = e.target.closest('.messages-thread-item');
+      if (!li) return;
+      const id = li.getAttribute('data-thread-id');
+      if (!id) return;
+      openDemoThread(id);
+    });
+
+    // gönderme formu
+    if (messagesSendFormEl && messagesInputEl) {
+      messagesSendFormEl.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = messagesInputEl.value.trim();
+        if (!text || !activeThreadId) return;
+
+        const thread = demoThreads.find((t) => t.id === activeThreadId);
+        if (!thread) return;
+
+        thread.messages.push({
+          fromMe: true,
+          text,
+          at: 'şimdi',
+        });
+        thread.lastMessage = text;
+        messagesInputEl.value = '';
+        renderMessagesThreadList();
+        renderMessagesConversation(thread);
+      });
+    }
+  }
+
+  // SPA router dışarıda olduğu için globalde tutuyoruz
+  window.futureAppInitMessages = initMessagesPage;
+
+
 async function loadUserProfile(userId) {
     try {
         // Önce profil bilgisini al
@@ -1239,7 +2218,15 @@ async function loadUserProfile(userId) {
     // Profil üst bilgileri
     if (profileDetailsEl) {
       profileDetailsEl.innerHTML = `
-        <div><strong>${escapeHtml(u.username)}</strong></div>
+        <div style="display:flex; gap:8px; align-items:center; justify-content:space-between;">
+          <button type="button" class="btn ghost-btn open-full-profile" data-user-id="${escapeHtml(u.id)}">
+            <strong>${escapeHtml(u.username)}</strong>
+          </button>
+
+          <button type="button" class="btn secondary-btn open-full-profile" data-user-id="${escapeHtml(u.id)}">
+            Tam profil
+          </button>
+        </div>
         <div class="small">Katılım: ${escapeHtml(u.joinedAt || '')}</div>
         <div class="small">
           Toplam: ${stats.total || 0}
@@ -1250,13 +2237,60 @@ async function loadUserProfile(userId) {
         </div>
       `;
     }
-        if (profileCategoryStatsEl) {
+    if (profileCategoryStatsEl) {
       if (!categoryStats.length) {
         profileCategoryStatsEl.innerHTML =
           '<p class="small subtle">Bu kullanıcı için kategori bazlı istatistik yok.</p>';
       } else {
-        let html = `
-          <h4 style="margin-top:4px; margin-bottom:4px;">Kategorilere göre performans</h4>
+        // Çözülen tahmini olan kategorileri al
+        const nonEmpty = categoryStats.filter(
+          (c) => (c.resolved || 0) > 0
+        );
+
+        // Accuracy'e göre sıralayıp ilk 3'ü al (eşitlikte resolved'a göre)
+        const top = [...nonEmpty]
+          .sort((a, b) => {
+            const accA = a.accuracy ?? 0;
+            const accB = b.accuracy ?? 0;
+            if (accB !== accA) return accB - accA;
+            return (b.resolved || 0) - (a.resolved || 0);
+          })
+          .slice(0, 3);
+
+        let html = '';
+
+        if (top.length) {
+          html += `
+            <h4 style="margin-top:4px; margin-bottom:2px;">En başarılı kategoriler</h4>
+            <div class="profile-category-highlights">
+          `;
+
+          top.forEach((c) => {
+            const acc = c.accuracy ?? 0;
+            let tierClass = 'tier-5';
+            if (acc >= 85) tierClass = 'tier-1';
+            else if (acc >= 70) tierClass = 'tier-2';
+            else if (acc >= 50) tierClass = 'tier-3';
+            else if (acc >= 25) tierClass = 'tier-4';
+
+            html += `
+              <div class="profile-category-pill ${tierClass}">
+                <span class="profile-category-pill-label">
+                  ${escapeHtml(c.label || c.key || '')}
+                </span>
+                <span class="profile-category-pill-value">%${acc}</span>
+              </div>
+            `;
+          });
+
+          html += `
+            </div>
+          `;
+        }
+
+        // Altına tüm kategoriler tablosunu koy
+        html += `
+          <h4 style="margin-top:6px; margin-bottom:4px;">Tüm kategoriler</h4>
           <table class="profile-category-table">
             <thead>
               <tr>
@@ -1279,7 +2313,7 @@ async function loadUserProfile(userId) {
               <td style="text-align:right;">${c.resolved || 0}</td>
               <td style="text-align:right;">${c.correct || 0}</td>
               <td style="text-align:right;">${c.incorrect || 0}</td>
-              <td style="text-align:right;">${(c.accuracy ?? 0)}%</td>
+              <td style="text-align:right;">${c.accuracy ?? 0}%</td>
             </tr>
           `;
         });
@@ -1292,6 +2326,7 @@ async function loadUserProfile(userId) {
         profileCategoryStatsEl.innerHTML = html;
       }
     }
+
 
     // Takip et / bırak butonu
     if (profileFollowBtn) {
@@ -1341,9 +2376,31 @@ async function loadUserProfile(userId) {
               : 'status-pending';
 
           const isLocked = !!p.isLocked;
-          const titleText = escapeHtml(
-            p.title || (isLocked ? 'Mühürlü tahmin' : '(Başlık yok)')
-          );
+                const canVote = !isLocked && rawStatus === 'pending';
+
+      const voteButtonsHtml = canVote
+        ? `
+        <div class="resolution-vote-buttons">
+          <button
+            type="button"
+            class="resolution-vote-btn"
+            onclick="window.handleResolutionVote(event, '${p.id}', 'correct')"
+          >
+            Doğru
+          </button>
+          <button
+            type="button"
+            class="resolution-vote-btn"
+            onclick="window.handleResolutionVote(event, '${p.id}', 'incorrect')"
+          >
+            Yanlış
+          </button>
+        </div>
+      `
+        : '';
+
+          const titleText = escapeHtml(p.title || '(Başlık yok)');
+
           const contentHtml = isLocked
             ? '<span class="small subtle">İçerik hedef tarih gelene kadar gizli.</span>'
             : escapeHtml(p.content || '').replace(/\n/g, '<br/>');
@@ -1369,6 +2426,7 @@ async function loadUserProfile(userId) {
                 ${metaText}
               </span>
               <div class="feed-footer-right">
+                ${voteButtonsHtml}
                 <span class="prediction-status-pill ${statusClass}">
                   ${statusLabel}
                 </span>
@@ -1387,6 +2445,13 @@ async function loadUserProfile(userId) {
           profilePredictionsEl.appendChild(div);
         });
       }
+    }
+
+     // Kategori istatistikleri ve rozetler
+    if (u && u.id) {
+      renderProfileCategoryStats(u.id);
+    } else {
+      renderProfileCategoryStats(userId);
     }
 
   } catch (err) {
@@ -1495,6 +2560,7 @@ async function loadUserProfile(userId) {
     if (predictionDetailEl) {
     predictionDetailEl.addEventListener('click', (e) => {
     const likeBtn = e.target.closest('.like-pill');
+    
     if (likeBtn) {
       e.stopPropagation();
       handleLikeToggle(likeBtn);
@@ -1526,12 +2592,12 @@ async function loadUserProfile(userId) {
 
       if (!authToken) {
         if (predictionMessageEl) {
-          predictionMessageEl.textContent =
-            'Tahmin göndermek için önce giriş yapın.';
+          predictionMessageEl.textContent = t('errors.login_required');
           predictionMessageEl.className = 'message error';
         }
         return;
       }
+
 
       const title = predictionTitleEl?.value?.trim() || '';
       const content = predictionContentEl?.value?.trim() || '';
@@ -1571,12 +2637,12 @@ async function loadUserProfile(userId) {
       if (targetDate < todayStr) {
         predictionDateEl?.classList.add('input-error');
         if (predictionMessageEl) {
-          predictionMessageEl.textContent =
-            'Açılma tarihi bugünden eski olamaz.';
+          predictionMessageEl.textContent = t('errors.date_past');
           predictionMessageEl.className = 'message error';
         }
         return;
       }
+
 
       // Aynı anda birden fazla gönderimi engelle
       if (predictionForm.dataset.submitting === '1') {
@@ -1606,13 +2672,12 @@ async function loadUserProfile(userId) {
         }
 
         if (predictionMessageEl) {
-          const niceDate = targetDate;
-          predictionMessageEl.textContent =
-            niceDate
-              ? `Tahminin ${niceDate} tarihine kadar mühürlendi. 🎉`
-              : 'Tahminin mühürlendi. 🎉';
+          predictionMessageEl.textContent = t('prediction.form.success', {
+            date: targetDate,
+          });
           predictionMessageEl.className = 'message success';
         }
+
 
         // Feed ve "Benim tahminlerim"i tazele
         await Promise.all([loadFeed(), loadMyPredictions({})]);
@@ -1778,6 +2843,7 @@ async function loadUserProfile(userId) {
       handleLikeToggle(likeBtn);
       return;
     }
+    
     const item = e.target.closest('.feed-item');
     if (!item) return;
     const id = item.dataset.id;
@@ -1814,6 +2880,21 @@ async function loadUserProfile(userId) {
   }
     });
   }
+
+    // Liderlik tablosunda bir kullanıcı adına tıklanınca profilini aç
+  if (leaderboardBodyEl) {
+    leaderboardBodyEl.addEventListener('click', (e) => {
+      const userLink = e.target.closest('.user-link');
+      if (!userLink) return;
+
+      const userId = userLink.dataset.userId;
+      if (userId) {
+        updateUserInUrl(userId);
+        loadUserProfile(userId);
+      }
+    });
+  }
+
 
   // İstatistik satırına tıklayınca "Benim tahminlerim"i o kategoriye göre filtrele
 if (myStatsEl) {
@@ -1867,6 +2948,20 @@ if (myStatsEl) {
     loadPredictionDetail(id);
   });
 }
+
+if (leaderboardBodyEl) {
+  leaderboardBodyEl.addEventListener('click', (e) => {
+    const userLink = e.target.closest('.user-link');
+    if (!userLink) return;
+
+    const uid = userLink.dataset.userId;
+    if (!uid) return;
+
+    updateUserInUrl(uid);
+    loadUserProfile(uid);
+  });
+}
+
 
   if (profileFollowBtn) {
   profileFollowBtn.addEventListener('click', async () => {
@@ -1952,18 +3047,34 @@ if (myStatsEl) {
     dmForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!authToken) return;
+
+      const recipientId = dmForm.dataset.recipientId;
+      if (!recipientId) {
+        alert('Önce mesaj göndermek istediğin kullanıcıyı seçmelisin.');
+        return;
+      }
+
       const text = dmMessageInputEl.value.trim();
       if (!text) return;
+
       try {
-        // Not: projendeki endpoint farklıysa değiştir.
-        await api.post('/api/messages/send', { content: text }, authToken);
+        await api.post(
+          `/api/messages/${encodeURIComponent(recipientId)}`,
+          { content: text },
+          authToken
+        );
         dmMessageInputEl.value = '';
-        // mesaj listesini yenilemek istersen burada çağır.
       } catch (err) {
         alert(err.message || 'Mesaj gönderilemedi.');
       }
     });
   }
+
+  // DM alıcısını başka yerlerden ayarlamak için yardımcı (opsiyonel)
+  window.futureAppSetDmRecipient = (recipientId) => {
+    if (dmForm) dmForm.dataset.recipientId = recipientId || '';
+  };
+
 
   // =========================
   // 12) İLK YÜKLEME
@@ -1999,10 +3110,104 @@ if (myStatsEl) {
 
   })();
 })();
+
 // Basit tab navigasyonu
-document.addEventListener('DOMContentLoaded', () => {
-  const tabButtons = document.querySelectorAll('.tab-button');
-  const tabPanels = document.querySelectorAll('.tab-panel');
+  document.addEventListener('DOMContentLoaded', () => {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabPanels = document.querySelectorAll('.tab-panel');
+
+    // Üst seviye sayfa navigasyonu (Ana sayfa / Profil / Mesajlar / Ayarlar)
+    const appPages = document.querySelectorAll('.app-page');
+    const pageNavButtons = document.querySelectorAll('.primary-nav .nav-link');
+
+    function showPage(pageId) {
+      appPages.forEach((page) => {
+        page.classList.toggle('app-page-active', page.id === pageId);
+      });
+    }
+
+    pageNavButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-page');
+        if (!target) return;
+
+        pageNavButtons.forEach((b) => b.classList.remove('nav-link-active'));
+        btn.classList.add('nav-link-active');
+
+        showPage(target);
+
+        // Profil sayfasına geçiliyorsa, verileri yükle
+        if (target === 'page-profile') {
+          if (window.futureAppLoadMyProfilePage) {
+            window.futureAppLoadMyProfilePage();
+          }
+        }
+        // Mesajlar sayfasına geçiliyorsa, mesaj layout'unu hazırla
+        if (target === 'page-messages') {
+          if (window.futureAppInitMessages) {
+            window.futureAppInitMessages();
+          }
+        }
+      });
+    });
+
+    // Sayfa yenilendiğinde profil zaten aktifse (örn. direkt linkle gelirse)
+    const initialActivePage = document.querySelector('.app-page.app-page-active');
+    if (initialActivePage && initialActivePage.id === 'page-profile') {
+    if (window.futureAppLoadMyProfilePage) {
+      window.futureAppLoadMyProfilePage();
+    }
+  }
+
+    // --- i18n setup ---
+  const supportedLangs = ['tr', 'en'];
+  const langStorageKey = 'futureapp_lang';
+
+  let currentLang =
+    localStorage.getItem(langStorageKey) ||
+    (navigator.language && navigator.language.startsWith('tr')
+      ? 'tr'
+      : 'en');
+
+  if (!supportedLangs.includes(currentLang)) {
+    currentLang = 'en';
+  }
+
+  let translations = {};
+
+  function t(key, vars = {}) {
+    // Çeviri yoksa key'in kendisini gösterme, ama şu an için fallback key olsun
+    const raw =
+      Object.prototype.hasOwnProperty.call(translations, key)
+        ? translations[key]
+        : key;
+
+    return raw.replace(/\{\{(\w+)\}\}/g, (_, name) =>
+      vars[name] != null ? String(vars[name]) : ''
+    );
+  }
+
+  function applyTranslationsToDom() {
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n');
+      if (!key) return;
+      el.textContent = t(key);
+    });
+  }
+
+  async function loadTranslations(lang) {
+    try {
+      const res = await fetch(`/i18n/${lang}.json`);
+      if (!res.ok) throw new Error('Translations not found');
+      translations = await res.json();
+      currentLang = lang;
+      localStorage.setItem(langStorageKey, lang);
+      applyTranslationsToDom();
+    } catch (err) {
+      console.error('Translation load error:', err);
+    }
+  }
+
 
   if (!tabButtons.length) return;
 
@@ -2020,4 +3225,57 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+
+
+  // Başlangıçta seçili dilin çevirilerini yükle
+  loadTranslations(currentLang);
+
+  // Sağ profilden "Tam profil" navigasyonu (ID standardı)
+document.body.addEventListener('click', (e) => {
+  const btn = e.target.closest('.open-full-profile');
+  if (!btn) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const uid = btn.dataset.userId;
+  if (!uid) {
+    console.warn('open-full-profile clicked but no data-user-id found');
+    return;
+  }
+
+  // URL güncelle (varsa)
+  try {
+    if (typeof updateUserInUrl === 'function') updateUserInUrl(uid);
+  } catch (err) {
+    console.warn('updateUserInUrl error:', err);
+  }
+
+  // Profil sayfasına geç: önce showPage, yoksa Profile nav'ına click
+  try {
+    if (typeof showPage === 'function') {
+      showPage('page-profile');
+    } else {
+      const profileNav = document.querySelector('.primary-nav .nav-link[data-page="page-profile"]');
+      if (profileNav) profileNav.click();
+    }
+  } catch (err) {
+    console.warn('showPage/nav error:', err);
+  }
+
+  // Full profil render
+  try {
+    if (typeof window.loadUserFullPage === 'function') {
+      window.loadUserFullPage(uid);
+    } else {
+      console.warn('loadUserFullPage is not defined on window');
+    }
+  } catch (err) {
+    console.error('loadUserFullPage error:', err);
+  }
 });
+
+});
+
+

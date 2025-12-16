@@ -82,12 +82,15 @@ router.get('/following', auth, async (req, res) => {
       .populate('following', 'username email')
       .sort({ createdAt: -1 });
 
-    const data = relations.map((rel) => ({
-      id: rel.following._id,
-      username: rel.following.username,
-      email: rel.following.email,
-      followedAt: rel.createdAt,
-    }));
+    const data = relations
+  .filter((rel) => rel.following) // null ise atla
+  .map((rel) => ({
+    id: rel.following._id,
+    username: rel.following.username,
+    email: rel.following.email,
+    followedAt: rel.createdAt,
+  }));
+
 
     return res.json({
       userId: currentUserId,
@@ -110,12 +113,15 @@ router.get('/followers', auth, async (req, res) => {
       .populate('follower', 'username email')
       .sort({ createdAt: -1 });
 
-    const data = relations.map((rel) => ({
-      id: rel.follower._id,
-      username: rel.follower.username,
-      email: rel.follower.email,
-      followedAt: rel.createdAt,
-    }));
+    const data = relations
+  .filter((rel) => rel.following) // null ise atla
+  .map((rel) => ({
+    id: rel.following._id,
+    username: rel.following.username,
+    email: rel.following.email,
+    followedAt: rel.createdAt,
+  }));
+
 
     return res.json({
       userId: currentUserId,
@@ -126,6 +132,98 @@ router.get('/followers', auth, async (req, res) => {
   } catch (error) {
     console.error('Get followers error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// Takip istatistikleri: Ben kaç kişiyi takip ediyorum, beni kaç kişi takip ediyor
+router.get('/me-stats', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Benim takip ettiklerim
+    const followingCount = await Follow.countDocuments({ follower: userId });
+    // Beni takip edenler
+    const followersCount = await Follow.countDocuments({ following: userId });
+
+    res.json({
+      followingCount,
+      followersCount,
+    });
+  } catch (err) {
+    console.error('follow /me-stats error:', err);
+    res.status(500).json({ error: 'Follow stats error' });
+  }
+});
+
+// Belirli bir kullanıcı için takip istatistikleri (ID ile)
+// GET /api/follow/user/:id/stats
+router.get('/user/:id/stats', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id).select('_id');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = user._id;
+
+    const followingCount = await Follow.countDocuments({ follower: userId });
+    const followersCount = await Follow.countDocuments({ following: userId });
+
+    return res.json({ followingCount, followersCount });
+  } catch (err) {
+    console.error('follow user id stats error:', err);
+    return res.status(500).json({ error: 'Follow stats error' });
+  }
+});
+
+// Belirli bir kullanıcı için takip istatistikleri
+// GET /api/follow/user/:username/stats
+router.get('/user/:username/stats', auth, async (req, res) => {
+  try {
+    const username = req.params.username;
+
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = user._id;
+
+    const followingCount = await Follow.countDocuments({ follower: userId });
+    const followersCount = await Follow.countDocuments({ following: userId });
+
+    res.json({
+      followingCount,
+      followersCount,
+    });
+  } catch (err) {
+    console.error('follow user stats error:', err);
+    res.status(500).json({ error: 'Follow stats error' });
+  }
+});
+
+// Belirli bir kullanıcı için takip istatistikleri (ID ile)
+// GET /api/follow/user/:id/stats
+router.get('/user/:id/stats', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id).select('_id');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = user._id;
+
+    const followingCount = await Follow.countDocuments({ follower: userId });
+    const followersCount = await Follow.countDocuments({ following: userId });
+
+    return res.json({ followingCount, followersCount });
+  } catch (err) {
+    console.error('follow user id stats error:', err);
+    return res.status(500).json({ error: 'Follow stats error' });
   }
 });
 

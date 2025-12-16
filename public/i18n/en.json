@@ -1,0 +1,15 @@
+
+{
+  "nav.feed": "Feed",
+  "nav.my_predictions": "My predictions",
+  "nav.explore": "Explore",
+  "nav.stats": "Stats",
+
+  "prediction.form.title": "Title",
+  "prediction.form.content": "Your prediction",
+  "prediction.form.submit": "Seal prediction",
+  "prediction.form.success": "Your prediction is sealed until {{date}}. 🎉",
+
+  "errors.login_required": "You need to sign in to do this.",
+  "errors.date_past": "Target date cannot be in the past."
+}

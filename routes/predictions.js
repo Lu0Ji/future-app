@@ -2,11 +2,34 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const Prediction = require('../models/Prediction');
+const mongoose = require('mongoose');
+const CROWD_MIN_VOTES = 3; // şimdilik test için 1, ileride 3-5 yaparız
+const CROWD_THRESHOLD = 0.7; // %70 çoğunluk
 const Comment = require('../models/Comment');
 const categoriesConfig = require('../config/categories');
 
 
 const allowedCategoryKeys = categoriesConfig.map((c) => c.key);
+
+function normalizeCategory(input) {
+  return String(input || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 50);
+}
+
+function isValidCategory(cat) {
+  // boş olmasın, çok uzamasın
+  if (!cat) return false;
+  if (cat.length < 2) return false;
+  if (cat.length > 50) return false;
+
+  // Çok riskli karakterleri engelle (basic)
+  // Harf, rakam, boşluk, tire, alt çizgi, nokta, & gibi karakterlere izin
+  if (!/^[\p{L}\p{N} _.\-&]+$/u.test(cat)) return false;
+
+  return true;
+}
 
 // Ortak helper: mühürlü mü?
 function isLocked(prediction) {
@@ -59,15 +82,19 @@ router.post('/', auth, async (req, res) => {
   try {
     const { title, content, targetDate, category, sourceCommentId } = req.body;
 
+    const normalizedCategory = normalizeCategory(category);
+
+    if (!isValidCategory(normalizedCategory)) {
+      return res.status(400).json({ error: 'Kategori geçersiz. (2-50 karakter)' });
+    }
+
+
     if (!title || !title.trim() || !content || !content.trim() || !targetDate || !category) {
       return res
         .status(400)
         .json({ error: 'Title, content, targetDate ve category zorunlu.' });
     }
 
-    if (!allowedCategoryKeys.includes(category)) {
-      return res.status(400).json({ error: 'Geçersiz kategori.' });
-    }
 
     const target = new Date(targetDate);
     if (Number.isNaN(target.getTime())) {
@@ -110,7 +137,7 @@ router.post('/', auth, async (req, res) => {
       user: req.user.id,
       title: title.trim(),
       content: content.trim(),
-      category,
+      category: normalizedCategory,
       targetDate: target,
     });
 
@@ -169,8 +196,8 @@ router.get('/mine', auth, async (req, res) => {
 
       return {
         id: p._id,
-        // Mühürlü ise başlık ve içerik yok
-        title: locked ? null : (p.title || null),
+        // Mühürlü ise sadece içerik gizli (başlık görünür)
+        title: p.title || null,
         content: locked ? null : p.content,
         category: p.category,
         targetDate: targetStr,
@@ -221,7 +248,7 @@ router.get('/:id', auth, async (req, res) => {
             createdAt: prediction.user.createdAt,
           }
         : null,
-      title: locked ? null : (prediction.title || null),
+      title: prediction.title || null,
       content: locked ? null : prediction.content,
       category: prediction.category,
       targetDate: targetStr,
@@ -523,5 +550,100 @@ router.post('/:id/comments', auth, async (req, res) => {
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
+// POST /api/predictions/:id/vote
+// Topluluk oylaması ile tahmini doğru/yanlış işaretlemek için oy ekler
+router.post('/:id/vote', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vote } = req.body;
+    
+        // ID formatı bozuksa CastError almadan direkt 404 dön
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ error: 'Tahmin bulunamadı.' });
+    }
+
+
+    if (!vote || !['correct', 'incorrect'].includes(vote)) {
+      return res.status(400).json({ error: 'Geçersiz oy.' });
+    }
+
+    const prediction = await Prediction.findById(id);
+    if (!prediction) {
+      return res.status(404).json({ error: 'Tahmin bulunamadı.' });
+    }
+
+    // Hedef tarihi gelmeden oy verilmesin
+    const now = new Date();
+    if (!prediction.targetDate || prediction.targetDate > now) {
+      return res
+        .status(400)
+        .json({ error: 'Bu tahmin henüz açılmadı, oy verilemez.' });
+    }
+
+    // Zaten çözülmüş tahmine tekrar oy verilmesin
+    if (prediction.status === 'correct' || prediction.status === 'incorrect') {
+      return res
+        .status(400)
+        .json({ error: 'Bu tahmin zaten sonuçlandırılmış.' });
+    }
+
+    // Aynı kullanıcı daha önce oy vermiş mi?
+    prediction.resolutionVotes = prediction.resolutionVotes || [];
+    const already = prediction.resolutionVotes.find(
+      (v) => String(v.user) === String(req.user.id)
+    );
+
+    if (already) {
+      // İkinci kez oy vermeye izin vermiyoruz, sadece mevcut durumu döndür
+      return res.json({
+        status: prediction.status || 'pending',
+        alreadyVoted: true,
+      });
+    }
+
+    // Yeni oyu ekle
+    prediction.resolutionVotes.push({
+      user: req.user.id,
+      vote,
+    });
+
+    // Oyları say
+    const total = prediction.resolutionVotes.length;
+    const correctVotes = prediction.resolutionVotes.filter(
+      (v) => v.vote === 'correct'
+    ).length;
+    const incorrectVotes = total - correctVotes;
+
+    // Kural: yeterli oy + %70 ve üzeri çoğunluk varsa statüyü güncelle
+    if (total >= CROWD_MIN_VOTES) {
+      const correctRatio = correctVotes / total;
+      const incorrectRatio = incorrectVotes / total;
+
+      if (correctRatio >= CROWD_THRESHOLD) {
+        prediction.status = 'correct';
+        prediction.resolutionMethod = 'crowd';
+        prediction.resolvedAt = now;
+      } else if (incorrectRatio >= CROWD_THRESHOLD) {
+        prediction.status = 'incorrect';
+        prediction.resolutionMethod = 'crowd';
+        prediction.resolvedAt = now;
+      }
+    }
+
+    await prediction.save();
+
+    return res.json({
+      status: prediction.status || 'pending',
+      alreadyVoted: false,
+    });
+  } catch (err) {
+    console.error('prediction vote error:', err);
+    return res
+      .status(500)
+      .json({ error: 'Oy verilirken bir hata oluştu.' });
+  }
+});
+
 
 module.exports = router;

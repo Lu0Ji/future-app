@@ -4,7 +4,7 @@ const auth = require('../middleware/auth');
 const Prediction = require('../models/Prediction');
 const categories = require('../config/categories');
 
-// Ortak: kategori stats objesi oluştur
+// Yardımcı: boş kategori istatistik objesi oluştur
 function createEmptyCategoryStats() {
   const statsByCategory = {};
   categories.forEach((cat) => {
@@ -21,7 +21,7 @@ function createEmptyCategoryStats() {
   return statsByCategory;
 }
 
-// Ortak: verilen tahmin listesine göre kategori stats doldur
+// Yardımcı: verilen tahmin listesine göre kategori istatistiklerini doldur
 function fillCategoryStats(statsByCategory, predictions) {
   predictions.forEach((p) => {
     const status = p.status || 'pending';
@@ -52,11 +52,10 @@ function fillCategoryStats(statsByCategory, predictions) {
 
 // GET /api/stats/me -> giriş yapmış kullanıcının genel + kategori bazlı istatistikleri
 router.get('/me', auth, async (req, res) => {
+
   try {
-    const userId = (req.user && req.user.id) || req.userId;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const userId = req.user.id;
+    const username = req.user.username;
 
     const predictions = await Prediction.find({ user: userId }).lean();
 
@@ -86,6 +85,8 @@ router.get('/me', auth, async (req, res) => {
       resolved > 0 ? Math.round((correct / resolved) * 100) : 0;
 
     return res.json({
+      userId,
+      username,
       total,
       resolved,
       correct,
@@ -118,5 +119,6 @@ router.get('/user/:id', auth, async (req, res) => {
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
+
 
 module.exports = router;
