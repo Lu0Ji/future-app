@@ -30,6 +30,13 @@ const predictionSchema = new mongoose.Schema(
       required: true,
     },
 
+    entryType: {
+      type: String,
+      enum: ['prediction', 'capsule'],
+      default: 'prediction',
+    },
+
+
     // Hedef tarih (tahminin açılacağı tarih)
     targetDate: {
       type: Date,

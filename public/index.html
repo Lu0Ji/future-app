@@ -118,6 +118,11 @@
           <section class="card new-prediction-card">
             <h2>Yeni tahmin</h2>
             <form id="prediction-form" class="stack-form" novalidate>
+              <label for="prediction-entry-type">Tür</label>
+              <select id="prediction-entry-type" name="entryType" required>
+                <option value="prediction" selected>Tahmin</option>
+                <option value="capsule">Zaman kapsülü (mesaj)</option>
+              </select>
               <label
                 for="prediction-title"
                 data-i18n="prediction.form.title"

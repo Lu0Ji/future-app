@@ -57,7 +57,7 @@ router.get('/me', auth, async (req, res) => {
     const userId = req.user.id;
     const username = req.user.username;
 
-    const predictions = await Prediction.find({ user: userId }).lean();
+    const predictions = await Prediction.find({ user: userId, entryType: { $ne: 'capsule' } }).lean();
 
     let total = 0;
     let resolved = 0;
@@ -105,7 +105,7 @@ router.get('/user/:id', auth, async (req, res) => {
   try {
     const userId = req.params.id;
 
-    const predictions = await Prediction.find({ user: userId }).lean();
+    const predictions = await Prediction.find({ user: userId, entryType: { $ne: 'capsule' } }).lean();
 
     const statsByCategory = createEmptyCategoryStats();
     fillCategoryStats(statsByCategory, predictions);

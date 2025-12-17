@@ -317,6 +317,7 @@
   const predictionContentEl = document.getElementById('prediction-content');
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
+  const entryTypeEl = document.getElementById('prediction-entry-type');
   const categoryDatalistEl = document.getElementById('prediction-category-list');
   const predictionMessageEl = document.getElementById('prediction-message');
   const predictionFromCommentHintEl = document.getElementById('prediction-from-comment-hint');
@@ -2603,6 +2604,7 @@ async function loadUserProfile(userId) {
       const content = predictionContentEl?.value?.trim() || '';
       const targetDate = predictionDateEl?.value || '';
       const category = categorySelectEl?.value || '';
+      const entryType = entryTypeEl?.value === 'capsule' ? 'capsule' : 'prediction';
 
       const missingFields = [];
 
@@ -2655,7 +2657,7 @@ async function loadUserProfile(userId) {
       }
 
       try {
-        const body = { title, content, targetDate, category };
+        const body = { title, content, targetDate, category, entryType };
 
         if (activeSourceCommentId) {
           body.sourceCommentId = activeSourceCommentId;

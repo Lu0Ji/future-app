@@ -2,6 +2,18 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const Prediction = require('../models/Prediction');
+const Category = require('../models/Category');
+
+function normalizeCategory(input) {
+  return String(input || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 50);
+}
+function normalizedKey(label) {
+  return normalizeCategory(label).toLowerCase();
+}
+
 const mongoose = require('mongoose');
 const CROWD_MIN_VOTES = 3; // şimdilik test için 1, ileride 3-5 yaparız
 const CROWD_THRESHOLD = 0.7; // %70 çoğunluk
@@ -80,20 +92,65 @@ function mapPredictionForUser(prediction, currentUserId) {
 // POST /api/predictions  -> tahmin oluştur
 router.post('/', auth, async (req, res) => {
   try {
-    const { title, content, targetDate, category, sourceCommentId } = req.body;
+    const { title, content, targetDate, category, entryType, sourceCommentId } = req.body;
+    const categoryLabel = normalizeCategory(category);
+    if (!categoryLabel || categoryLabel.length < 2) {
+      return res.status(400).json({ error: 'Kategori 2-50 karakter olmalı.' });
+    }
 
+    // Öneri kaydı: kategori yoksa pending olarak aç
+    try {
+      const key = normalizedKey(categoryLabel);
+      const existing = await Category.findOne({ normalized: key }).lean();
+
+      if (!existing) {
+        await Category.create({
+          label: categoryLabel,
+          normalized: key,
+          status: 'pending',
+          createdBy: req.userId,
+          votesUp: [req.userId],
+        });
+      }
+    } catch (e) {
+      // kategori önerisi başarısız olsa bile tahmini engellemeyelim
+      console.warn('category suggest failed (non-blocking):', e?.message || e);
+    }
+
+
+    // 1) Zorunlu alanlar
+    if (!title || !title.trim() || !content || !content.trim() || !targetDate || !category) {
+      return res.status(400).json({ error: 'Title, content, targetDate ve category zorunlu.' });
+    }
+
+    // 2) Kategori normalize + validate
     const normalizedCategory = normalizeCategory(category);
+    const safeEntryType = entryType === 'capsule' ? 'capsule' : 'prediction';
+
 
     if (!isValidCategory(normalizedCategory)) {
       return res.status(400).json({ error: 'Kategori geçersiz. (2-50 karakter)' });
     }
 
+    // 3) Kategori önerisi (non-blocking): yoksa pending olarak aç
+    try {
+      const key = normalizedCategory.toLowerCase();
+      const existing = await Category.findOne({ normalized: key }).lean();
 
-    if (!title || !title.trim() || !content || !content.trim() || !targetDate || !category) {
-      return res
-        .status(400)
-        .json({ error: 'Title, content, targetDate ve category zorunlu.' });
+      if (!existing) {
+        await Category.create({
+          label: normalizedCategory,
+          normalized: key,
+          status: 'pending',
+          createdBy: req.user.id, // sende req.user.id kullanıyorsun
+          votesUp: [req.user.id],
+        });
+      }
+    } catch (e) {
+      // kategori önerisi başarısız olsa bile tahmini engellemeyelim
+      console.warn('category suggest failed (non-blocking):', e?.message || e);
     }
+
 
 
     const target = new Date(targetDate);
@@ -138,6 +195,7 @@ router.post('/', auth, async (req, res) => {
       title: title.trim(),
       content: content.trim(),
       category: normalizedCategory,
+      entryType: safeEntryType,
       targetDate: target,
     });
 
@@ -200,6 +258,7 @@ router.get('/mine', auth, async (req, res) => {
         title: p.title || null,
         content: locked ? null : p.content,
         category: p.category,
+        entryType: p.entryType || 'prediction',
         targetDate: targetStr,
         createdAt: p.createdAt,
         status: p.status || 'pending',

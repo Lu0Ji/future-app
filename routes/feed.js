@@ -52,6 +52,7 @@ router.get('/', auth, async (req, res) => {
         userId: p.user._id,
         username: p.user.username,
         category: p.category,
+        entryType: p.entryType || 'prediction',
         title: p.title || '',
         // Mühürlü ise içerik HİÇ gönderilmiyor:
         content: isLocked ? null : p.content,
