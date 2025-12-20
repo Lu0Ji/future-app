@@ -95,6 +95,14 @@ const predictionSchema = new mongoose.Schema(
       enum: ['none', 'crowd'],
       default: 'none',
     },
+
+    // Yorum sabitleme (ana tahmine ait sabit yorum)
+    pinnedCommentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Comment',
+      default: null,
+    },
+
   },
   {
     timestamps: true, // createdAt, updatedAt otomatik

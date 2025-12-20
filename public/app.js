@@ -240,13 +240,33 @@
     predictionTitleEl.value = 'Yorumdan üretilen tahmin';
   }
 
+  // Yorum içeriğini tahmin içeriğine koy
   predictionContentEl.value = comment.content || '';
   activeSourceCommentId = comment.id;
 
+  // Bu tahmin, seçili tahminle aynı kategori ve açılma tarihine “yakın” dursun:
+  // (Ama kullanıcı isterse değiştirebilir.)
+  if (selectedPredictionMeta) {
+    if (predictionDateEl && selectedPredictionMeta.targetDate) {
+      predictionDateEl.value = String(selectedPredictionMeta.targetDate);
+    }
+    if (categorySelectEl && selectedPredictionMeta.category) {
+      categorySelectEl.value = String(selectedPredictionMeta.category);
+    }
+  }
+
+  // Yorumdan üretilen şey “tahmin” olsun (kapsül değil)
+  if (entryTypeEl) {
+    entryTypeEl.value = 'prediction';
+  }
+
   if (predictionFromCommentHintEl) {
     const created = fmtDate(comment.createdAt);
-    predictionFromCommentHintEl.textContent =
-      `Bu tahmin, ${created || 'bu'} tarihli yorumundan oluşturulacak.`;
+    const tDate = selectedPredictionMeta?.targetDate ? String(selectedPredictionMeta.targetDate) : null;
+
+    predictionFromCommentHintEl.textContent = tDate
+      ? `Bu tahmin, ${created || 'bu'} tarihli yorumundan oluşturulacak. Açılma tarihi varsayılan olarak ${tDate} ayarlandı.`
+      : `Bu tahmin, ${created || 'bu'} tarihli yorumundan oluşturulacak.`;
   }
 
   if (predictionMessageEl) {
@@ -265,6 +285,7 @@
   let authToken = localStorage.getItem('token') || '';
   let currentUser = null; // {id, username} dolacak
   let selectedPredictionId = null; // Detayda seçili tahmin
+  let selectedPredictionMeta = null; // { ownerId, category, targetDate }
   let activeSourceCommentId = null; // Yorumdan tahmin üretirken kullanacağız
   let currentComments = []; // Son yüklenen yorum listesi
 
@@ -309,6 +330,8 @@
   const loginForm = document.getElementById('login-form');
   const logoutButton = document.getElementById('logout-button');
   const userInfoEl = document.getElementById('user-info');
+  const categoryModerationCardEl = document.getElementById('category-moderation-card');
+
 
   // Tahmin oluşturma
   const predictionSection = document.getElementById('prediction-section');
@@ -317,6 +340,8 @@
   const predictionContentEl = document.getElementById('prediction-content');
   const predictionDateEl = document.getElementById('prediction-date');
   const categorySelectEl = document.getElementById('prediction-category');
+  const pendingCategoriesListEl = document.getElementById('pending-categories-list');
+  const pendingCategoriesMessageEl = document.getElementById('pending-categories-message');
   const entryTypeEl = document.getElementById('prediction-entry-type');
   const categoryDatalistEl = document.getElementById('prediction-category-list');
   const predictionMessageEl = document.getElementById('prediction-message');
@@ -506,6 +531,92 @@
       }
     }
   }
+
+  async function loadPendingCategories() {
+  if (!pendingCategoriesListEl || !pendingCategoriesMessageEl) return;
+
+  // Kart varsayılan gizli kalsın
+  if (categoryModerationCardEl) categoryModerationCardEl.style.display = 'none';
+
+  if (!authToken) {
+    pendingCategoriesMessageEl.textContent =
+      'Kategori önerilerini görmek için giriş yapmalısın.';
+    pendingCategoriesListEl.innerHTML = '';
+    return;
+  }
+
+  // Admin kontrolü
+  try {
+    const me = await api.get('/api/auth/me', authToken);
+    const isAdmin = me?.role === 'admin';
+
+    if (!isAdmin) {
+      pendingCategoriesListEl.innerHTML = '';
+      pendingCategoriesMessageEl.textContent = '';
+      return;
+    }
+
+    // admin ise kartı göster
+    if (categoryModerationCardEl) categoryModerationCardEl.style.display = '';
+  } catch (e) {
+    pendingCategoriesListEl.innerHTML = '';
+    pendingCategoriesMessageEl.textContent = '';
+    return;
+  }
+
+  // Buradan sonrası sadece admin için çalışır
+  pendingCategoriesMessageEl.textContent = 'Yükleniyor...';
+  pendingCategoriesListEl.innerHTML = '';
+
+  try {
+    const res = await api.get('/api/categories/pending', authToken);
+    const items = Array.isArray(res.data) ? res.data : [];
+
+    if (!items.length) {
+      pendingCategoriesMessageEl.textContent = 'Bekleyen kategori önerisi yok.';
+      return;
+    }
+
+    pendingCategoriesMessageEl.textContent = `${items.length} adet bekleyen öneri var.`;
+
+    pendingCategoriesListEl.innerHTML = `
+      <div class="table">
+        <div class="table-row table-head">
+          <div><strong>Kategori</strong></div>
+          <div><strong>Up</strong></div>
+          <div><strong>Down</strong></div>
+          <div><strong>Tarih</strong></div>
+          <div><strong>İşlem</strong></div>
+        </div>
+
+        ${items
+          .map((c) => {
+            const label = c.label || '';
+            const up = c.up ?? 0;
+            const down = c.down ?? 0;
+            const date = c.createdAt ? new Date(c.createdAt).toLocaleDateString('tr-TR') : '-';
+
+            return `
+              <div class="table-row">
+                <div>${escapeHtml(label)}</div>
+                <div>${up}</div>
+                <div>${down}</div>
+                <div>${escapeHtml(date)}</div>
+                <div style="display:flex; gap:8px; justify-content:flex-end;">
+                  <button type="button" class="btn secondary-btn cat-approve" data-label="${escapeHtml(label)}">Onayla</button>
+                  <button type="button" class="btn ghost-btn cat-reject" data-label="${escapeHtml(label)}">Reddet</button>
+                </div>
+              </div>
+            `;
+          })
+          .join('')}
+      </div>
+    `;
+  } catch (err) {
+    console.error('loadPendingCategories error:', err);
+    pendingCategoriesMessageEl.textContent = 'Bekleyen kategoriler yüklenemedi.';
+  }
+}
 
 
   // =========================
@@ -1138,8 +1249,16 @@ async function loadCommentsForPrediction(predictionId) {
       `/api/predictions/${predictionId}/comments`,
       authToken
     );
-    const items = data.items || [];
+    const pinnedCommentId = data.pinnedCommentId || null;
+    let items = data.items || [];
     currentComments = items;
+
+    // Sabit yorum varsa en üste al
+    items = [...items].sort((a, b) => {
+      const ap = !!(a.pinned || (pinnedCommentId && String(a.id) === String(pinnedCommentId)));
+      const bp = !!(b.pinned || (pinnedCommentId && String(b.id) === String(pinnedCommentId)));
+      return Number(bp) - Number(ap);
+    });
 
     if (!items.length) {
       commentsListEl.innerHTML =
@@ -1163,10 +1282,27 @@ async function loadCommentsForPrediction(predictionId) {
           !!(commentUserId && currentUserId && commentUserId === currentUserId);
         const alreadyPromoted = !!c.childPredictionId;
 
+        const ownerId = selectedPredictionMeta?.ownerId || null;
+        const isOwner = !!(ownerId && currentUserId && String(ownerId) === String(currentUserId));
+        const isPinned = !!(c.pinned || (pinnedCommentId && String(c.id) === String(pinnedCommentId)));
+
+
+        const pinButton =
+          isOwner
+            ? (isPinned
+                ? `<button class="comment-unpin-btn" data-comment-id="${c.id}">Sabiti kaldır</button>`
+                : `<button class="comment-pin-btn" data-comment-id="${c.id}">Sabitle</button>`)
+            : '';
+
+
         const promoteButton =
           isMine && !alreadyPromoted
             ? `<button class="comment-promote-btn" data-comment-id="${c.id}">Bu yorumdan tahmin oluştur</button>`
             : '';
+
+        const pinnedBadge = isPinned
+          ? `<span class="comment-badge pinned">Sabitlendi</span>`
+          : '';
 
         const badge = alreadyPromoted
           ? `<span class="comment-badge">Tahmine dönüştürüldü</span>`
@@ -1180,7 +1316,9 @@ async function loadCommentsForPrediction(predictionId) {
             </div>
             <div class="comment-content">${content}</div>
             <div class="comment-footer">
+              ${pinnedBadge}
               ${badge}
+              ${pinButton}
               ${promoteButton}
             </div>
           </div>
@@ -1197,6 +1335,46 @@ async function loadCommentsForPrediction(predictionId) {
         const comment = currentComments.find((c) => c.id === id);
         if (!comment) return;
         prefillPredictionFormFromComment(comment);
+      });
+    });
+
+
+    const pinButtons = commentsListEl.querySelectorAll('.comment-pin-btn');
+    pinButtons.forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-comment-id');
+        if (!id || !selectedPredictionId) return;
+
+        try {
+          await api.post(
+            `/api/predictions/${encodeURIComponent(selectedPredictionId)}/pin-comment`,
+            { commentId: id },
+            authToken
+          );
+          await loadCommentsForPrediction(selectedPredictionId);
+        } catch (err) {
+          console.error('pin comment error:', err);
+          alert((err && err.message) || 'Yorum sabitlenemedi.');
+        }
+      });
+    });
+
+    const unpinButtons = commentsListEl.querySelectorAll('.comment-unpin-btn');
+    unpinButtons.forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!selectedPredictionId) return;
+
+        try {
+          await api.post(
+            `/api/predictions/${encodeURIComponent(selectedPredictionId)}/unpin-comment`,
+            {},
+            authToken
+          );
+          await loadCommentsForPrediction(selectedPredictionId);
+        } catch (err) {
+          console.error('unpin comment error:', err);
+          alert((err && err.message) || 'Sabit yorum kaldırılamadı.');
+        }
       });
     });
   } catch (err) {
@@ -1227,6 +1405,13 @@ async function loadPredictionDetail(predictionId) {
       `/api/predictions/${encodeURIComponent(predictionId)}`,
       authToken
     );
+
+    // Seçili tahmin meta bilgisini yorumlar/promote için sakla
+    selectedPredictionMeta = {
+      ownerId: data.user?.id || data.user?._id || null,
+      category: data.category || '',
+      targetDate: data.targetDate || '',
+    };
 
     if (!data || data.error) {
       predictionDetailEl.innerHTML =
@@ -3126,6 +3311,29 @@ if (leaderboardBodyEl) {
       appPages.forEach((page) => {
         page.classList.toggle('app-page-active', page.id === pageId);
       });
+      if (pageId === 'page-settings') {
+    // Varsayılan kapalı kalsın
+    if (categoryModerationCardEl) categoryModerationCardEl.style.display = 'none';
+
+    // Admin kontrolü
+    (async () => {
+      if (!authToken) return;
+
+      try {
+        const me = await api.get('/api/auth/me', authToken);
+        const isAdmin = me?.role === 'admin';
+
+        if (!isAdmin) return;
+
+        if (categoryModerationCardEl) categoryModerationCardEl.style.display = '';
+        await loadPendingCategories();
+      } catch (err) {
+        // admin endpointi yoksa / token geçersizse yine gizli kalsın
+        if (categoryModerationCardEl) categoryModerationCardEl.style.display = 'none';
+      }
+    })();
+  }
+
     }
 
     pageNavButtons.forEach((btn) => {
@@ -3275,6 +3483,34 @@ document.body.addEventListener('click', (e) => {
     }
   } catch (err) {
     console.error('loadUserFullPage error:', err);
+  }
+});
+
+document.body.addEventListener('click', async (e) => {
+  const approveBtn = e.target.closest('.cat-approve');
+  const rejectBtn = e.target.closest('.cat-reject');
+  if (!approveBtn && !rejectBtn) return;
+
+  e.preventDefault();
+
+  const label = (approveBtn || rejectBtn)?.dataset?.label;
+  if (!label) return;
+
+  if (!authToken) return;
+
+  try {
+    if (approveBtn) {
+      await api.post(`/api/categories/${encodeURIComponent(label)}/approve`, {}, authToken);
+    } else {
+      await api.post(`/api/categories/${encodeURIComponent(label)}/reject`, {}, authToken);
+    }
+
+    // Listeyi ve kategori autocomplete'i güncelle
+    await loadPendingCategories();
+    if (typeof loadCategories === 'function') await loadCategories();
+  } catch (err) {
+    console.error('category decision error:', err);
+    alert('İşlem başarısız oldu. Console log’a bak.');
   }
 });
 

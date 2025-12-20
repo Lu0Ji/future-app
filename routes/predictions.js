@@ -18,6 +18,7 @@ const mongoose = require('mongoose');
 const CROWD_MIN_VOTES = 3; // şimdilik test için 1, ileride 3-5 yaparız
 const CROWD_THRESHOLD = 0.7; // %70 çoğunluk
 const Comment = require('../models/Comment');
+const Follow = require('../models/Follow');
 const categoriesConfig = require('../config/categories');
 
 
@@ -326,43 +327,6 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// GET /api/predictions/:id/comments  -> bir tahmine ait yorumlar
-router.get('/:id/comments', auth, async (req, res) => {
-  try {
-    const predictionId = req.params.id;
-
-    const prediction = await Prediction.findById(predictionId).lean();
-    if (!prediction) {
-      return res.status(404).json({ error: 'Prediction not found.' });
-    }
-
-    const comments = await Comment.find({ prediction: predictionId })
-      .sort({ createdAt: 1 })
-      .populate('user', '_id username email');
-
-    const items = comments.map((c) => ({
-      id: c._id.toString(),
-      content: c.content,
-      createdAt: c.createdAt,
-      user: c.user
-        ? {
-            id: c.user._id.toString(),
-            username: c.user.username,
-            email: c.user.email,
-          }
-        : null,
-      childPredictionId: c.childPrediction
-        ? c.childPrediction.toString()
-        : null,
-    }));
-
-    return res.json({ items });
-  } catch (err) {
-    console.error('Get comments error:', err);
-    return res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
 // POST /api/predictions/:id/comments  -> yeni yorum ekle
 router.post('/:id/comments', auth, async (req, res) => {
   try {
@@ -524,8 +488,6 @@ router.post('/:id/like', auth, async (req, res) => {
   }
 });
 
-
-
 // YORUMLAR
 
 // GET /api/predictions/:id/comments  -> bir tahmine ait yorumlar
@@ -537,6 +499,9 @@ router.get('/:id/comments', auth, async (req, res) => {
     if (!prediction) {
       return res.status(404).json({ error: 'Prediction not found.' });
     }
+    const pinnedCommentId = prediction.pinnedCommentId
+    ? prediction.pinnedCommentId.toString()
+    : null;
 
     const comments = await Comment.find({ prediction: predictionId })
       .sort({ createdAt: 1 })
@@ -551,6 +516,7 @@ router.get('/:id/comments', auth, async (req, res) => {
             id: c.user._id.toString(),
             username: c.user.username,
             email: c.user.email,
+            pinned: pinnedCommentId && String(c._id) === String(pinnedCommentId),
           }
         : null,
       childPredictionId: c.childPrediction
@@ -558,7 +524,7 @@ router.get('/:id/comments', auth, async (req, res) => {
         : null,
     }));
 
-    return res.json({ items });
+    return res.json({ pinnedCommentId, items });
   } catch (err) {
     console.error('Get comments error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
@@ -583,6 +549,21 @@ router.post('/:id/comments', auth, async (req, res) => {
       return res.status(404).json({ error: 'Prediction not found.' });
     }
 
+    // Yalnızca takipçiler (veya sahibi) yorum yapabilir
+  if (String(prediction.user) !== String(req.user.id)) {
+    const isFollowing = await Follow.exists({
+      follower: req.user.id,
+      following: prediction.user,
+    });
+
+    if (!isFollowing) {
+      return res
+        .status(403)
+        .json({ error: 'Yorum yapmak için bu kullanıcıyı takip etmelisin.' });
+    }
+  }
+
+
     const comment = await Comment.create({
       prediction: prediction._id,
       user: req.user.id,
@@ -606,6 +587,64 @@ router.post('/:id/comments', auth, async (req, res) => {
     });
   } catch (err) {
     console.error('Create comment error:', err);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/predictions/:id/pin-comment  -> yorum sabitle (sadece tahmin sahibi)
+router.post('/:id/pin-comment', auth, async (req, res) => {
+  try {
+    const predictionId = req.params.id;
+    const { commentId } = req.body || {};
+
+    if (!commentId) {
+      return res.status(400).json({ error: 'commentId zorunlu.' });
+    }
+
+    const prediction = await Prediction.findById(predictionId);
+    if (!prediction) {
+      return res.status(404).json({ error: 'Prediction not found.' });
+    }
+
+    if (String(prediction.user) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'Sadece tahmin sahibi yorum sabitleyebilir.' });
+    }
+
+    const comment = await Comment.findById(commentId).lean();
+    if (!comment || String(comment.prediction) !== String(prediction._id)) {
+      return res.status(400).json({ error: 'Bu yorum bu tahmine ait değil.' });
+    }
+
+    prediction.pinnedCommentId = comment._id;
+    await prediction.save();
+
+    return res.json({ message: 'Pinned.', pinnedCommentId: prediction.pinnedCommentId.toString() });
+  } catch (err) {
+    console.error('Pin comment error:', err);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// POST /api/predictions/:id/unpin-comment -> sabiti kaldır (sadece tahmin sahibi)
+router.post('/:id/unpin-comment', auth, async (req, res) => {
+  try {
+    const predictionId = req.params.id;
+
+    const prediction = await Prediction.findById(predictionId);
+    if (!prediction) {
+      return res.status(404).json({ error: 'Prediction not found.' });
+    }
+
+    if (String(prediction.user) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'Sadece tahmin sahibi sabiti kaldırabilir.' });
+    }
+
+    prediction.pinnedCommentId = null;
+    await prediction.save();
+
+    return res.json({ message: 'Unpinned.', pinnedCommentId: null });
+  } catch (err) {
+    console.error('Unpin comment error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
